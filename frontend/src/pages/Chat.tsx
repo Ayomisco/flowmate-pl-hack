@@ -122,7 +122,7 @@ const Chat = () => {
                     <div className="flex items-center gap-2">
                       <img src={flowmateLogo} alt="" width={28} height={28} className="rounded-md" />
                       <span className="text-primary font-semibold text-sm">
-                        Agent Flow
+                        FlowMate Agent
                       </span>
                     </div>
 

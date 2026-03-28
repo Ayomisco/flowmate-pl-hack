@@ -46,14 +46,14 @@ const Login = () => {
 
         <h1 className="text-4xl font-bold tracking-tight mb-1">FlowMate</h1>
         <p className="text-muted-foreground text-sm tracking-[0.2em] uppercase mb-10">
-          The Digital Ether
+          Autonomous Financial Agent
         </p>
 
         {/* Tagline */}
         <div className="glass-card px-6 py-4 text-center mb-6 w-full">
-          <p className="text-base font-body">
-            Your autonomous financial agent on{" "}
-            <span className="text-primary font-semibold text-glow">Flow.</span>
+          <p className="text-base font-body leading-relaxed">
+            Your autonomous financial operating system. <br/>
+            <span className="text-primary font-semibold text-glow">Save automatically.</span> <span className="text-primary font-semibold text-glow">Send intelligently.</span> <span className="text-primary font-semibold text-glow">Invest autonomously.</span>
           </p>
         </div>
 

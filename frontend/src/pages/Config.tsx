@@ -14,9 +14,9 @@ import BottomNav from "@/components/BottomNav";
 import { useNavigate } from "react-router-dom";
 
 const autonomyModes = [
-  { id: "manual", label: "Manual", desc: "Approve every action" },
-  { id: "assist", label: "Assist", desc: "Confirm before executing" },
-  { id: "autopilot", label: "Autopilot", desc: "Fully autonomous" },
+  { id: "manual", label: "Manual", desc: "Approve every operation" },
+  { id: "assist", label: "Assisted", desc: "Confirm before FlowMate executes" },
+  { id: "autopilot", label: "Autonomous", desc: "FlowMate operates fully autonomously" },
 ] as const;
 
 const menuItems = [

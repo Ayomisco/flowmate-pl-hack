@@ -94,7 +94,7 @@ const Dashboard = () => {
           {/* Vaults */}
           <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
             <h3 className="text-xs text-muted-foreground uppercase tracking-widest mb-3">
-              Vaults
+              Wealth Vaults
             </h3>
             <div className="grid grid-cols-2 gap-3">
               {vaults.map((v) => (
@@ -140,7 +140,7 @@ const Dashboard = () => {
           {/* Recent activity */}
           <motion.div {...fadeUp} transition={{ delay: 0.3 }}>
             <h3 className="text-xs text-muted-foreground uppercase tracking-widest mb-3">
-              Recent Activity
+              Autonomous Operations
             </h3>
             <div className="glass-card divide-y divide-border/30">
               {recentActivity.map((a, i) => (
