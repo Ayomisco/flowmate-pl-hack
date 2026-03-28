@@ -1,14 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Gauge,
-  ChevronRight,
-  LogOut,
-  User,
-  Shield,
-  Bell,
-  HelpCircle,
-} from "lucide-react";
+import { ChevronRight, LogOut, User } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
 import { useNavigate } from "react-router-dom";
@@ -20,10 +12,10 @@ const autonomyModes = [
 ] as const;
 
 const menuItems = [
-  { icon: User, label: "Edit Profile", route: "/profile" },
-  { icon: Shield, label: "Security & Limits", route: "" },
-  { icon: Bell, label: "Notifications", route: "" },
-  { icon: HelpCircle, label: "Help & Support", route: "" },
+  { label: "Edit Profile", route: "/profile" },
+  { label: "Security & Limits", route: "" },
+  { label: "Notifications", route: "" },
+  { label: "Help & Support", route: "" },
 ];
 
 const fadeUp = {
@@ -41,66 +33,69 @@ const Config = () => {
       <div className="flex-1 app-container">
         <ChatHeader />
 
-        <div className="px-4 pt-4 pb-28 space-y-6 overflow-y-auto">
+        <div className="px-4 pt-6 pb-28 space-y-4 overflow-y-auto">
           {/* User card */}
-          <motion.div {...fadeUp} className="glass-card-bright p-5 flex items-center gap-4">
-            <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center border border-primary/30">
-              <User className="w-6 h-6 text-muted-foreground" />
+          <motion.div {...fadeUp} className="card-secondary flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20">
+              <User className="w-6 h-6 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-bold text-base truncate">Amaka Obi</p>
+              <p className="font-semibold text-sm truncate">Amaka Obi</p>
               <p className="text-xs text-muted-foreground truncate">amaka@email.com</p>
-              <p className="text-[10px] font-mono text-primary/70 mt-0.5">0x1a2b...9f3d</p>
             </div>
           </motion.div>
 
-          {/* Autonomy slider */}
-          <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
-            <h3 className="text-xs text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Gauge className="w-3.5 h-3.5" /> Autonomy Mode
-            </h3>
-            <div className="glass-card p-1 flex gap-1">
+          {/* Divider */}
+          <div className="divider-subtle" />
+
+          {/* Autonomy section */}
+          <motion.div {...fadeUp} transition={{ delay: 0.05 }} className="space-y-3">
+            <p className="text-label">Agent Autonomy</p>
+            <div className="grid grid-cols-3 gap-2">
               {autonomyModes.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => setMode(m.id)}
-                  className={`flex-1 py-3 rounded-xl text-center transition-all text-sm ${
+                  className={`py-3 rounded-xl text-xs font-medium transition-all ${
                     mode === m.id
-                      ? "bg-primary text-primary-foreground font-semibold shadow-lg"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-primary text-primary-foreground shadow-lg"
+                      : "bg-card/50 text-muted-foreground hover:bg-card/70"
                   }`}
                 >
                   {m.label}
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground mt-2 text-center">
+            <p className="text-xs text-muted-foreground px-1">
               {autonomyModes.find((m) => m.id === mode)?.desc}
             </p>
           </motion.div>
 
-          {/* Menu items */}
-          <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
-            <div className="glass-card divide-y divide-border/30">
+          {/* Divider */}
+          <div className="divider-subtle" />
+
+          {/* Settings menu */}
+          <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="space-y-2">
+            <p className="text-label">Settings</p>
+            <div className="space-y-1">
               {menuItems.map((item) => (
                 <button
                   key={item.label}
                   onClick={() => item.route && navigate(item.route)}
-                  className="flex items-center gap-3 px-4 py-3.5 w-full text-left hover:bg-muted/20 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-lg bg-card/30 hover:bg-card/50 transition-colors text-sm"
                 >
-                  <item.icon className="w-4 h-4 text-muted-foreground" />
-                  <span className="flex-1 text-sm">{item.label}</span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground/50" />
+                  <span className="font-medium">{item.label}</span>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
               ))}
             </div>
           </motion.div>
 
-          {/* Logout */}
-          <motion.div {...fadeUp} transition={{ delay: 0.15 }}>
+          {/* Sign out button */}
+          <motion.div {...fadeUp} transition={{ delay: 0.15 }} className="pt-4">
             <button
               onClick={() => navigate("/")}
-              className="btn-glass w-full flex items-center justify-center gap-2 text-destructive"
+              className="w-full px-4 py-3 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive font-medium transition-colors flex items-center justify-center gap-2"
             >
               <LogOut className="w-4 h-4" />
               Sign Out

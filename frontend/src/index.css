@@ -120,6 +120,43 @@
     @apply px-4 py-3 max-w-[85%] text-sm leading-relaxed;
     border-left: 2px solid hsl(var(--primary) / 0.4);
   }
+
+  /* New card styles for cleaner wallet-first design */
+  .card-primary {
+    @apply bg-gradient-to-br from-primary/20 to-primary/10 backdrop-blur-xl border border-primary/30 rounded-3xl p-6;
+    box-shadow: 0 0 50px -15px hsl(var(--primary) / 0.2);
+  }
+
+  .card-secondary {
+    @apply bg-card/40 backdrop-blur-md border border-border/40 rounded-2xl p-5;
+    box-shadow: 0 0 20px -10px hsl(var(--glass-glow) / 0.05);
+  }
+
+  .card-action {
+    @apply bg-card/50 backdrop-blur-md border border-primary/20 rounded-2xl p-4 hover:bg-card/70 hover:border-primary/30 transition-all active:scale-[0.98] cursor-pointer;
+  }
+
+  .divider-subtle {
+    @apply h-px bg-gradient-to-r from-border/0 via-border/30 to-border/0;
+  }
+
+  /* Typography utilities */
+  .text-balance {
+    @apply text-4xl font-bold tracking-tight;
+  }
+
+  .text-label {
+    @apply text-xs font-semibold tracking-widest uppercase text-muted-foreground;
+  }
+
+  /* Typography improvements */
+  .text-body {
+    @apply text-sm leading-relaxed text-foreground;
+  }
+
+  .text-title {
+    @apply text-lg font-semibold text-foreground;
+  }
 }
 
 @layer utilities {

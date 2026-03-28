@@ -92,13 +92,8 @@ const Chat = () => {
       <div className="flex-1 flex flex-col app-container">
         <ChatHeader />
 
-        {/* Session badge */}
-        <div className="flex justify-center py-3">
-          <span className="status-badge text-[10px]">Autonomous Session Active</span>
-        </div>
-
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pb-36 space-y-5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           <AnimatePresence initial={false}>
             {messages.map((msg) => (
               <motion.div
@@ -110,14 +105,14 @@ const Chat = () => {
                 {msg.role === "user" ? (
                   <div className="flex flex-col items-end gap-1">
                     <div className="chat-bubble-user">
-                      <p className="font-body">{msg.content}</p>
+                      <p>{msg.content}</p>
                     </div>
                     <span className="text-[10px] text-muted-foreground mr-1">
                       {msg.time}
                     </span>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {/* Agent label */}
                     <div className="flex items-center gap-2">
                       <img src={flowmateLogo} alt="" width={28} height={28} className="rounded-md" />
@@ -127,41 +122,36 @@ const Chat = () => {
                     </div>
 
                     {/* Text bubble */}
-                    <div className="chat-bubble-agent glass-card-bright font-body">
+                    <div className="card-secondary">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
 
                     {/* Optional card */}
                     {msg.card && (
-                      <div className="glass-card p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-primary tracking-widest uppercase font-semibold">
-                            {msg.card.label}
-                          </span>
-                          <Zap className="w-4 h-4 text-primary" />
-                        </div>
-                        <h3 className="text-lg font-bold">{msg.card.title}</h3>
+                      <div className="card-secondary space-y-3">
+                        <h3 className="text-sm font-semibold text-foreground">{msg.card.title}</h3>
                         {msg.card.progress && (
                           <>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-muted-foreground">Progress</span>
-                              <span className="text-primary font-semibold">
-                                ${msg.card.progress.current.toLocaleString()} / $
-                                {msg.card.progress.total.toLocaleString()}
-                              </span>
-                            </div>
-                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full transition-all"
-                                style={{
-                                  width: `${(msg.card.progress.current / msg.card.progress.total) * 100}%`,
-                                }}
-                              />
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Progress</span>
+                                <span className="text-primary font-semibold">
+                                  {Math.round((msg.card.progress.current / msg.card.progress.total) * 100)}%
+                                </span>
+                              </div>
+                              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary rounded-full transition-all"
+                                  style={{
+                                    width: `${(msg.card.progress.current / msg.card.progress.total) * 100}%`,
+                                  }}
+                                />
+                              </div>
                             </div>
                           </>
                         )}
                         {msg.card.eta && (
-                          <p className="text-xs text-primary/80 italic">{msg.card.eta}</p>
+                          <p className="text-xs text-muted-foreground">{msg.card.eta}</p>
                         )}
                         {msg.card.action && (
                           <button className="btn-primary w-full text-sm mt-1">
@@ -178,21 +168,21 @@ const Chat = () => {
         </div>
 
         {/* Input */}
-        <div className="fixed bottom-16 left-0 right-0 z-40 flex justify-center">
-          <div className="w-full max-w-md lg:max-w-lg px-4 pb-2">
-            <div className="glass-card flex items-center gap-2 px-4 py-2">
+        <div className="absolute bottom-16 left-0 right-0 z-40 flex justify-center px-4 py-3">
+          <div className="w-full max-w-md lg:max-w-lg">
+            <div className="card-secondary flex items-center gap-2">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && send()}
                 placeholder="Message FlowMate..."
-                className="flex-1 bg-transparent text-sm font-body outline-none placeholder:text-muted-foreground"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
               <button
                 onClick={send}
                 disabled={!input.trim()}
-                className="p-2 rounded-xl bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-30"
+                className="p-2 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-30"
               >
                 <Send className="w-4 h-4" />
               </button>
