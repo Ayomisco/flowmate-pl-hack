@@ -1,0 +1,28 @@
+# IDE and editor
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Redundant files
+redundants/
+
+# Documentation
+flowmate-prd.md
+prd.md
+skills.md
+
+# Dependencies
+node_modules/
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+.next/

@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 150 10% 5%;
+    --foreground: 150 10% 92%;
+
+    --card: 150 8% 10%;
+    --card-foreground: 150 10% 92%;
+
+    --popover: 150 8% 10%;
+    --popover-foreground: 150 10% 92%;
+
+    --primary: 145 100% 50%;
+    --primary-foreground: 150 20% 5%;
+
+    --secondary: 150 8% 14%;
+    --secondary-foreground: 150 10% 80%;
+
+    --muted: 150 6% 16%;
+    --muted-foreground: 150 8% 55%;
+
+    --accent: 145 100% 50%;
+    --accent-foreground: 150 20% 5%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 150 8% 18%;
+    --input: 150 8% 18%;
+    --ring: 145 100% 50%;
+
+    --radius: 1rem;
+
+    --glass-bg: 150 10% 12%;
+    --glass-border: 150 10% 20%;
+    --glass-glow: 145 100% 50%;
+
+    --sidebar-background: 150 10% 7%;
+    --sidebar-foreground: 150 10% 80%;
+    --sidebar-primary: 145 100% 50%;
+    --sidebar-primary-foreground: 150 20% 5%;
+    --sidebar-accent: 150 8% 14%;
+    --sidebar-accent-foreground: 150 10% 92%;
+    --sidebar-border: 150 8% 18%;
+    --sidebar-ring: 145 100% 50%;
+
+    font-family: 'Space Grotesk', sans-serif;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-card/60 backdrop-blur-xl border border-border/50 rounded-2xl;
+    box-shadow: 0 0 40px -10px hsl(var(--glass-glow) / 0.08);
+  }
+
+  .glass-card-bright {
+    @apply bg-card/40 backdrop-blur-xl border border-primary/20 rounded-2xl;
+    box-shadow: 0 0 30px -5px hsl(var(--glass-glow) / 0.15);
+  }
+
+  .glass-input {
+    @apply bg-muted/50 backdrop-blur-sm border border-border/60 rounded-xl text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/30 outline-none transition-all;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3 transition-all hover:brightness-110 active:scale-[0.98];
+    box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.4);
+  }
+
+  .btn-glass {
+    @apply bg-card/60 backdrop-blur-xl border border-border/60 text-foreground font-medium rounded-xl px-6 py-3 transition-all hover:bg-card/80 active:scale-[0.98];
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium tracking-widest uppercase bg-muted/50 backdrop-blur-sm border border-border/40 text-muted-foreground;
+  }
+
+  .glow-dot {
+    @apply w-2 h-2 rounded-full bg-primary;
+    box-shadow: 0 0 8px 2px hsl(var(--primary) / 0.6);
+  }
+
+  .app-container {
+    @apply mx-auto w-full max-w-md lg:max-w-lg;
+  }
+
+  .page-shell {
+    @apply min-h-screen flex flex-col bg-background;
+  }
+
+  .bottom-nav {
+    @apply fixed bottom-0 left-0 right-0 z-50 flex justify-center;
+  }
+
+  .bottom-nav-inner {
+    @apply w-full max-w-md lg:max-w-lg bg-card/80 backdrop-blur-xl border-t border-border/40 flex items-center justify-around py-2 px-4;
+  }
+
+  .chat-bubble-user {
+    @apply glass-card px-4 py-3 max-w-[85%] ml-auto text-sm leading-relaxed;
+  }
+
+  .chat-bubble-agent {
+    @apply px-4 py-3 max-w-[85%] text-sm leading-relaxed;
+    border-left: 2px solid hsl(var(--primary) / 0.4);
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 20px hsl(var(--primary) / 0.5);
+  }
+}
