@@ -6,7 +6,6 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetClose,
 } from "@/components/ui/sheet";
 
 interface ReceiveModalProps {
@@ -31,11 +30,13 @@ const ReceiveModal = ({ isOpen, onClose, userWalletAddress }: ReceiveModalProps)
       <SheetContent side="right" className="w-full sm:w-[420px] flex flex-col">
         <SheetHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b border-border/30">
           <SheetTitle className="text-xl font-bold">Receive Money</SheetTitle>
-          <SheetClose asChild>
-            <button className="rounded-lg hover:bg-muted/50 transition-colors p-1">
-              <X className="w-5 h-5" />
-            </button>
-          </SheetClose>
+          <button
+            onClick={onClose}
+            className="rounded-lg hover:bg-muted/50 transition-colors p-1"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </SheetHeader>
 
         <div className="flex-1 flex flex-col justify-between py-6 space-y-6">

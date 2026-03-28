@@ -1,0 +1,51 @@
+{
+  "emulators": {
+    "default": {
+      "port": 3569,
+      "serviceAccount": "emulator-account"
+    }
+  },
+  "networks": {
+    "emulator": {
+      "host": "127.0.0.1:3569",
+      "key": "8ae3d0461cfed6d6859cebf3573265c0e21f04f77fbed32218b82b0c917f7488"
+    },
+    "testnet": {
+      "host": "access.devnet.nodes.onflow.org:9000",
+      "key": "${TESTNET_ACCOUNT_PRIVATE_KEY}"
+    },
+    "mainnet": {
+      "host": "access.mainnet.nodes.onflow.org:9000",
+      "key": "${MAINNET_ACCOUNT_PRIVATE_KEY}"
+    }
+  },
+  "accounts": {
+    "emulator-account": {
+      "address": "f8d6e0586b0a20c7",
+      "key": "8ae3d0461cfed6d6859cebf3573265c0e21f04f77fbed32218b82b0c917f7488"
+    },
+    "testnet-account": {
+      "address": "${TESTNET_ACCOUNT_ADDRESS}",
+      "key": {
+        "type": "file",
+        "location": "./testnet-key.txt"
+      }
+    }
+  },
+  "deployments": {
+    "emulator": {
+      "emulator-account": [
+        "FlowMateAgent",
+        "VaultManager",
+        "ScheduledTransactions"
+      ]
+    },
+    "testnet": {
+      "testnet-account": [
+        "FlowMateAgent",
+        "VaultManager",
+        "ScheduledTransactions"
+      ]
+    }
+  }
+}

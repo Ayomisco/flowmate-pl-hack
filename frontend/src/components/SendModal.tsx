@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Send, X } from "lucide-react";
+import { Send, X, ChevronLeft } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -14,10 +14,12 @@ interface SendModalProps {
   onClose: () => void;
 }
 
+type SendStep = "form" | "confirmation" | "success";
+
 const SendModal = ({ isOpen, onClose }: SendModalProps) => {
+  const [step, setStep] = useState<SendStep>("form");
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
-  const [submitted, setSubmitted] = useState(false);
 
   const isFormValid = recipient.trim().length > 0 && parseFloat(amount) > 0;
   const currentBalance = 21000;
@@ -25,36 +27,68 @@ const SendModal = ({ isOpen, onClose }: SendModalProps) => {
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (isFormValid) {
-      setSubmitted(true);
-      setTimeout(() => {
-        setRecipient("");
-        setAmount("");
-        setSubmitted(false);
-        onClose();
-      }, 1500);
+      setStep("confirmation");
     }
   };
 
-  const handleClose = () => {
+  const handleConfirm = () => {
+    setStep("success");
+    setTimeout(() => {
+      resetAndClose();
+    }, 1500);
+  };
+
+  const handleBack = () => {
+    setStep("form");
+  };
+
+  const resetAndClose = () => {
     setRecipient("");
     setAmount("");
-    setSubmitted(false);
+    setStep("form");
     onClose();
   };
 
+  const handleClose = () => {
+    resetAndClose();
+  };
+
   return (
-    <Sheet open={isOpen} onOpenChange={handleClose}>
+    <Sheet open={isOpen} onOpenChange={() => {
+      if (step === "form") {
+        handleClose();
+      }
+    }}>
       <SheetContent side="right" className="w-full sm:w-[420px] flex flex-col">
+        {/* Header */}
         <SheetHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b border-border/30">
-          <SheetTitle className="text-xl font-bold">Send Money</SheetTitle>
-          <SheetClose asChild>
-            <button className="rounded-lg hover:bg-muted/50 transition-colors p-1">
-              <X className="w-5 h-5" />
-            </button>
-          </SheetClose>
+          <div className="flex items-center gap-2">
+            {step !== "form" && (
+              <button
+                onClick={handleBack}
+                className="rounded-lg hover:bg-muted/50 transition-colors p-1"
+                aria-label="Back"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+            )}
+            <SheetTitle className="text-xl font-bold">
+              {step === "form" && "Send Money"}
+              {step === "confirmation" && "Confirm Transfer"}
+              {step === "success" && "Transfer Complete"}
+            </SheetTitle>
+          </div>
+          <button
+            onClick={handleClose}
+            className="rounded-lg hover:bg-muted/50 transition-colors p-1"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </SheetHeader>
 
-        {!submitted ? (
+        {/* Form Step */}
+        {step === "form" && (
           <form onSubmit={handleSend} className="flex-1 flex flex-col justify-between py-6 space-y-4">
             <div className="space-y-4">
               {/* Available Balance */}
@@ -124,7 +158,69 @@ const SendModal = ({ isOpen, onClose }: SendModalProps) => {
               </button>
             </div>
           </form>
-        ) : (
+        )}
+
+        {/* Confirmation Step */}
+        {step === "confirmation" && (
+          <motion.div
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col justify-between py-6 space-y-4"
+          >
+            <div className="space-y-4">
+              {/* Current Balance */}
+              <div className="card-secondary space-y-1">
+                <p className="text-label">Current Balance</p>
+                <p className="text-2xl font-bold text-primary">${currentBalance.toLocaleString()}</p>
+              </div>
+
+              {/* Transfer Details */}
+              <div className="space-y-3">
+                <div className="card-secondary space-y-1">
+                  <p className="text-label">Recipient</p>
+                  <p className="text-sm font-mono break-all">{recipient}</p>
+                </div>
+
+                <div className="card-secondary space-y-1">
+                  <p className="text-label">Amount</p>
+                  <p className="text-2xl font-bold">${parseFloat(amount || "0").toLocaleString()}</p>
+                </div>
+
+                <div className="card-secondary space-y-1">
+                  <p className="text-label">Balance After Transfer</p>
+                  <p className="text-lg font-semibold text-primary">
+                    ${(currentBalance - parseFloat(amount || "0")).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground text-center pt-2">
+                Please review the details carefully before confirming
+              </p>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleBack}
+                className="btn-glass flex-1"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                <Send className="w-4 h-4" />
+                Confirm Send
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Success Step */}
+        {step === "success" && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
