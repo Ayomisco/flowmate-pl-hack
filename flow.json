@@ -13,6 +13,26 @@
       "key": "d7115bde5b9dc30973feeefc9dc18ee7923d3667542032cdcf2a789294ac4cbc"
     }
   },
+  "contracts": {
+    "FlowMateAgent": {
+      "source": "./.contracts/FlowMateAgent.cdc",
+      "aliases": {
+        "testnet": "0xf8d6e0586b0a20c7"
+      }
+    },
+    "VaultManager": {
+      "source": "./.contracts/VaultManager.cdc",
+      "aliases": {
+        "testnet": "0xf8d6e0586b0a20c7"
+      }
+    },
+    "ScheduledTransactions": {
+      "source": "./.contracts/ScheduledTransactions.cdc",
+      "aliases": {
+        "testnet": "0xf8d6e0586b0a20c7"
+      }
+    }
+  },
   "deployments": {
     "testnet": {
       "my-testnet-account": [
