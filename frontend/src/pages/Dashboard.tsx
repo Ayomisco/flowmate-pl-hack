@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowUpRight,
@@ -8,7 +9,8 @@ import {
 } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
-import { useNavigate } from "react-router-dom";
+import SendModal from "@/components/SendModal";
+import ReceiveModal from "@/components/ReceiveModal";
 
 const vaults = [
   { label: "Available", amount: 12500 },
@@ -30,7 +32,8 @@ const fadeUp = {
 };
 
 const Dashboard = () => {
-  const navigate = useNavigate();
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
   const totalVaults = vaults.reduce((sum, v) => sum + v.amount, 0);
 
   return (
@@ -48,11 +51,11 @@ const Dashboard = () => {
 
           {/* Primary Actions: Send & Receive */}
           <motion.div {...fadeUp} transition={{ delay: 0.05 }} className="grid grid-cols-2 gap-3">
-            <button onClick={() => navigate("/chat")} className="card-action flex flex-col items-center justify-center gap-2 py-6">
+            <button onClick={() => setShowSendModal(true)} className="card-action flex flex-col items-center justify-center gap-2 py-6">
               <Send className="w-6 h-6 text-primary" />
               <span className="text-sm font-medium">Send</span>
             </button>
-            <button onClick={() => navigate("/chat")} className="card-action flex flex-col items-center justify-center gap-2 py-6">
+            <button onClick={() => setShowReceiveModal(true)} className="card-action flex flex-col items-center justify-center gap-2 py-6">
               <ArrowDownLeft className="w-6 h-6 text-primary" />
               <span className="text-sm font-medium">Receive</span>
             </button>
@@ -120,6 +123,10 @@ const Dashboard = () => {
             </button>
           </motion.div>
         </div>
+
+        {/* Modals */}
+        <SendModal isOpen={showSendModal} onClose={() => setShowSendModal(false)} />
+        <ReceiveModal isOpen={showReceiveModal} onClose={() => setShowReceiveModal(false)} userWalletAddress="0x1a2b...9f3d" />
 
         <BottomNav />
       </div>
