@@ -1,61 +1,30 @@
 {
-  "emulators": {
-    "default": {
-      "port": 3569,
-      "serviceAccount": "emulator-account"
-    }
-  },
   "networks": {
-    "emulator": {
-      "host": "127.0.0.1:3569",
-      "accessNode": "http://127.0.0.1:8080"
-    },
     "testnet": {
-      "host": "https://rest-testnet.onflow.org",
-      "accessNode": "https://rest-testnet.onflow.org",
-      "key": "flow-testnet-account"
+      "host": "https://rest-testnet.onflow.org"
     },
     "mainnet": {
-      "host": "https://mainnet.onflow.org",
-      "accessNode": "https://mainnet.onflow.org",
-      "key": "flow-mainnet-account"
+      "host": "https://rest-mainnet.onflow.org"
     }
   },
   "accounts": {
-    "emulator-account": {
-      "address": "f8d6e0586b0a20c7",
-      "key": "8ae3d0461cfed6d6859cebf3573265c0e21f04f77fbed32218b82b0c917f7488"
-    },
-    "flow-testnet-account": {
-      "address": "${FLOW_ACCOUNT_ADDRESS}",
-      "key": "${FLOW_ACCOUNT_PRIVATE_KEY}"
-    }
-  },
-  "contracts": {
-    "FlowMateAgent": {
-      "source": "./contracts/FlowMateAgent.cdc",
-      "aliases": {
-        "emulator": "0xf8d6e0586b0a20c7",
-        "testnet": "${FLOWMATE_AGENT_CONTRACT}"
-      }
-    },
-    "VaultManager": {
-      "source": "./contracts/VaultManager.cdc",
-      "aliases": {
-        "emulator": "0xf8d6e0586b0a20c7",
-        "testnet": "${VAULT_MANAGER_CONTRACT}"
-      }
-    },
-    "ScheduledTransactions": {
-      "source": "./contracts/ScheduledTransactions.cdc",
-      "aliases": {
-        "emulator": "0xf8d6e0586b0a20c7",
-        "testnet": "${SCHEDULED_TRANSACTIONS_CONTRACT}"
+    "my-testnet-account": {
+      "address": "0xc26f3fa2883a46db",
+      "key": {
+        "index": 0,
+        "signatureAlgorithm": "ECDSA_P256",
+        "hashAlgorithm": "SHA3_256",
+        "privateKey": "d7115bde5b9dc30973feeefc9dc18ee7923d3667542032cdcf2a789294ac4cbc"
       }
     }
   },
   "deployments": {
-    "emulator": ["emulator-account"],
-    "testnet": ["flow-testnet-account"]
+    "testnet": {
+      "my-testnet-account": [
+        "FlowMateAgent",
+        "VaultManager",
+        "ScheduledTransactions"
+      ]
+    }
   }
 }

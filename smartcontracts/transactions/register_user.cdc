@@ -1,19 +1,34 @@
-import FlowMateAgent from 0xFlowMateAgent
-import VaultManager from 0xVaultManager
+import FlowMateAgent from 0x01
+import VaultManager from 0x02
 
-/// Transaction to register a new user
-/// Creates both FlowMateAgent config and user vaults in a single atomic transaction
-
-transaction(autonomyMode: String) {
-  prepare(signer: AuthAccount) {
-    // Initialize FlowMateAgent user config
-    FlowMateAgent.registerUser(acct: signer, initialMode: autonomyMode)
-
-    // Create user vaults (available, savings, emergency, staking)
-    VaultManager.createUserVaults(acct: signer)
-  }
-
-  execute {
-    log("User registered successfully")
-  }
+transaction(userId: String, autonomyMode: String, dailyLimit: UFix64) {
+    prepare(signer: AuthAccount) {
+        // Register user with FlowMateAgent
+        let userAccount <- FlowMateAgent.registerUser(
+            userId: userId,
+            autonomyMode: autonomyMode,
+            dailyLimit: dailyLimit
+        )
+        
+        // Create vaults for user
+        let userVaults <- VaultManager.createUserVaults()
+        
+        // Save resources to account
+        signer.save(<- userAccount, to: /storage/flowmateUserAccount)
+        signer.save(<- userVaults, to: /storage/userVaults)
+        
+        // Create public links
+        signer.link<&FlowMateAgent.UserAccount>(
+            /public/flowmateUserAccount,
+            target: /storage/flowmateUserAccount
+        )
+        signer.link<&VaultManager.UserVaults>(
+            /public/userVaults,
+            target: /storage/userVaults
+        )
+    }
+    
+    execute {
+        log("User registered successfully")
+    }
 }

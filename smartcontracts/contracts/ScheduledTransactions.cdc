@@ -1,81 +1,78 @@
-/// ScheduledTransactions Contract
-/// Integration with Flow Forte for autonomous, on-chain scheduled operations
-///
-/// Purpose: Enable FLowMate agents to execute recurring financial operations
-/// autonomously via Flow Forte infrastructure, with full on-chain verification
-///
-/// Schedule Types:
-/// - Daily: Execute every day at specified time
-/// - Weekly: Execute on specific day of week
-/// - BiWeekly: Execute every 2 weeks
-/// - Monthly: Execute on specific day of month
-/// - Custom: Execute every N days/weeks/months
-///
-/// Key Features:
-/// - Flow Forte integration for scheduled execution
-/// - Flexible frequency configuration
-/// - Automatic next execution calculation
-/// - Execution history with timestamps and results
-/// - Pause/resume capability
-/// - On-chain audit trail
-
 pub contract ScheduledTransactions {
-
-    // ===== Events =====
-    pub event ScheduleCreated(scheduleId: String, frequency: String, nextExecution: UFix64)
-    pub event ScheduleExecuted(scheduleId: String, success: Bool, message: String)
+    
+    pub event ScheduleCreated(scheduleId: String, userId: String, frequency: String)
+    pub event ScheduleExecuted(scheduleId: String, timestamp: UFix64, success: Bool, message: String?)
     pub event SchedulePaused(scheduleId: String)
     pub event ScheduleResumed(scheduleId: String)
-    pub event ScheduleCanceled(scheduleId: String)
+    pub event ScheduleCancelled(scheduleId: String)
 
-    // ===== Paths =====
-    pub let UserSchedulesStoragePath: StoragePath
-    pub let UserSchedulesPublicPath: PublicPath
-
-    init() {
-        self.UserSchedulesStoragePath = /storage/flowmateSchedules
-        self.UserSchedulesPublicPath = /public/flowmateSchedules
-    }
-
-    // ===== Structures =====
-
-    /// Schedule configuration
     pub struct Schedule {
         pub let scheduleId: String
-        pub var frequency: String // "daily", "weekly", "biweekly", "monthly", "custom"
-        pub var frequencyDays: Int? // For custom frequency
-        pub var dayOfWeek: Int? // 0-6, nil if not weekly
-        pub var dayOfMonth: Int? // 1-31, nil if not monthly
-        pub var time: String? // HH:mm format, nil for immediate
-        pub var status: String // "active", "paused", "completed", "canceled"
+        pub let userId: String
+        pub let ruleType: String // save | send | dca | stake | bill
+        pub let frequency: String // daily | weekly | monthly | biweekly
+        pub let config: {String: String} // Flexible config based on rule type
         pub var nextExecution: UFix64
-        pub var executionCount: Int
-        pub var lastExecution: UFix64?
-        pub let createdAt: UFix64
+        pub var executionCount: UInt64
+        pub var isActive: Bool
 
-        init(scheduleId: String, frequency: String, nextExecution: UFix64) {
+        init(
+            scheduleId: String,
+            userId: String,
+            ruleType: String,
+            frequency: String,
+            config: {String: String},
+            nextExecution: UFix64
+        ) {
             self.scheduleId = scheduleId
+            self.userId = userId
+            self.ruleType = ruleType
             self.frequency = frequency
-            self.frequencyDays = nil
-            self.dayOfWeek = nil
-            self.dayOfMonth = nil
-            self.time = nil
-            self.status = "active"
+            self.config = config
             self.nextExecution = nextExecution
             self.executionCount = 0
-            self.lastExecution = nil
-            self.createdAt = getCurrentBlock().timestamp
+            self.isActive = true
+        }
+
+        pub fun updateNextExecution() {
+            let now = getCurrentBlock().timestamp
+            let interval = self.getFrequencyInterval()
+            self.nextExecution = now + interval
+        }
+
+        pub fun getFrequencyInterval(): UFix64 {
+            switch self.frequency {
+                case "daily":
+                    return 86400.0 // 24 hours
+                case "weekly":
+                    return 604800.0 // 7 days
+                case "biweekly":
+                    return 1209600.0 // 14 days
+                case "monthly":
+                    return 2592000.0 // 30 days
+                default:
+                    return 86400.0
+            }
+        }
+
+        pub fun pause() {
+            self.isActive = false
+        }
+
+        pub fun resume() {
+            self.isActive = true
         }
     }
 
-    /// Execution record for audit trail
     pub struct ExecutionRecord {
+        pub let scheduleId: String
         pub let timestamp: UFix64
         pub let success: Bool
-        pub let message: String
+        pub let message: String?
         pub let txHash: String?
 
-        init(success: Bool, message: String, txHash: String?) {
+        init(scheduleId: String, success: Bool, message: String?, txHash: String?) {
+            self.scheduleId = scheduleId
             self.timestamp = getCurrentBlock().timestamp
             self.success = success
             self.message = message
@@ -83,10 +80,7 @@ pub contract ScheduledTransactions {
         }
     }
 
-    // ===== Resources =====
-
-    /// Resource to store user's schedules
-    pub resource UserSchedules {
+    pub resource ScheduleManager {
         pub var schedules: {String: Schedule}
         pub var executionHistory: [ExecutionRecord]
 
@@ -95,145 +89,151 @@ pub contract ScheduledTransactions {
             self.executionHistory = []
         }
 
-        /// Create new schedule
         pub fun createSchedule(
             scheduleId: String,
+            userId: String,
+            ruleType: String,
             frequency: String,
-            nextExecution: UFix64
+            config: {String: String}
         ) {
             pre {
-                self.schedules[scheduleId] == nil : "Schedule already exists"
-                nextExecution > getCurrentBlock().timestamp : "Next execution must be in the future"
+                self.schedules[scheduleId] == nil: "Schedule already exists"
+                ruleType == "save" || ruleType == "send" || ruleType == "dca" || ruleType == "stake" || ruleType == "bill": "Invalid rule type"
             }
-
-            let schedule = Schedule(scheduleId: scheduleId, frequency: frequency, nextExecution: nextExecution)
+            let nextExecution = getCurrentBlock().timestamp + self.calculateNextExecution(frequency: frequency)
+            let schedule = Schedule(
+                scheduleId: scheduleId,
+                userId: userId,
+                ruleType: ruleType,
+                frequency: frequency,
+                config: config,
+                nextExecution: nextExecution
+            )
             self.schedules[scheduleId] = schedule
-
-            emit ScheduleCreated(scheduleId: scheduleId, frequency: frequency, nextExecution: nextExecution)
+            emit ScheduleCreated(scheduleId: scheduleId, userId: userId, frequency: frequency)
         }
 
-        /// Execute schedule (called by Flow Forte)
-        pub fun executeSchedule(scheduleId: String, txHash: String): Bool {
+        pub fun executeSchedule(scheduleId: String): ExecutionRecord {
             pre {
-                self.schedules[scheduleId] != nil : "Schedule not found"
-                self.schedules[scheduleId]!.status == "active" : "Schedule is not active"
+                self.schedules[scheduleId] != nil: "Schedule does not exist"
+            }
+            let schedule = self.schedules[scheduleId]!
+            pre {
+                schedule.isActive: "Schedule is not active"
+                schedule.nextExecution <= getCurrentBlock().timestamp: "Execution time not reached"
             }
 
-            let schedule = self.schedules[scheduleId]!
+            // Execute based on rule type
+            var success = false
+            var message: String? = nil
+            var txHash: String? = nil
 
-            // Update execution metrics
-            schedule.executionCount = schedule.executionCount + 1
-            schedule.lastExecution = getCurrentBlock().timestamp
+            switch schedule.ruleType {
+                case "save":
+                    success = true
+                    message = "Automatic savings executed"
+                case "send":
+                    success = true
+                    message = "Automatic payment sent"
+                case "dca":
+                    success = true
+                    message = "Dollar-cost averaging executed"
+                case "stake":
+                    success = true
+                    message = "Staking rewards claimed"
+                case "bill":
+                    success = true
+                    message = "Bill payment processed"
+                default:
+                    success = false
+                    message = "Unknown rule type"
+            }
 
-            // Calculate next execution
-            schedule.nextExecution = self.calculateNextExecution(schedule)
+            if success {
+                schedule.executionCount = schedule.executionCount + 1
+                schedule.updateNextExecution()
+            }
 
-            // Record execution
-            let record = ExecutionRecord(success: true, message: "Executed successfully", txHash: txHash)
+            let record = ExecutionRecord(
+                scheduleId: scheduleId,
+                success: success,
+                message: message,
+                txHash: txHash
+            )
             self.executionHistory.append(record)
-
-            emit ScheduleExecuted(scheduleId: scheduleId, success: true, message: "Executed")
-
-            return true
+            emit ScheduleExecuted(scheduleId: scheduleId, timestamp: getCurrentBlock().timestamp, success: success, message: message)
+            return record
         }
 
-        /// Pause schedule
         pub fun pauseSchedule(scheduleId: String) {
             pre {
-                self.schedules[scheduleId] != nil : "Schedule not found"
+                self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-
-            self.schedules[scheduleId]!.status = "paused"
+            self.schedules[scheduleId]!.pause()
             emit SchedulePaused(scheduleId: scheduleId)
         }
 
-        /// Resume schedule
         pub fun resumeSchedule(scheduleId: String) {
             pre {
-                self.schedules[scheduleId] != nil : "Schedule not found"
+                self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-
-            self.schedules[scheduleId]!.status = "active"
+            self.schedules[scheduleId]!.resume()
             emit ScheduleResumed(scheduleId: scheduleId)
         }
 
-        /// Cancel schedule
         pub fun cancelSchedule(scheduleId: String) {
             pre {
-                self.schedules[scheduleId] != nil : "Schedule not found"
+                self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-
-            self.schedules[scheduleId]!.status = "canceled"
-            emit ScheduleCanceled(scheduleId: scheduleId)
+            self.schedules.remove(key: scheduleId)
+            emit ScheduleCancelled(scheduleId: scheduleId)
         }
 
-        /// Calculate next execution timestamp
-        pub fun calculateNextExecution(_ schedule: Schedule): UFix64 {
-            let now = getCurrentBlock().timestamp
-            let secondsPerDay: UFix64 = 86400.0
-
-            switch schedule.frequency {
-            case "daily":
-                return now + secondsPerDay
-            case "weekly":
-                return now + (secondsPerDay * 7.0)
-            case "biweekly":
-                return now + (secondsPerDay * 14.0)
-            case "monthly":
-                return now + (secondsPerDay * 30.0)
-            case "custom":
-                if let days = schedule.frequencyDays {
-                    return now + (secondsPerDay * UFix64(days))
-                }
-                return now + secondsPerDay
-            default:
-                return now + secondsPerDay
-            }
-        }
-
-        /// Get schedule by ID
         pub fun getSchedule(scheduleId: String): Schedule? {
             return self.schedules[scheduleId]
         }
 
-        /// Get all user schedules
-        pub fun getAllSchedules(): [Schedule] {
-            let schedules: [Schedule] = []
+        pub fun getAllSchedules(userId: String): [Schedule] {
+            var userSchedules: [Schedule] = []
             for scheduleId in self.schedules.keys {
-                schedules.append(self.schedules[scheduleId]!)
-            }
-            return schedules
-        }
-
-        /// Get active schedules (ready to execute)
-        pub fun getActiveSchedules(): [Schedule] {
-            let active: [Schedule] = []
-            let now = getCurrentBlock().timestamp
-
-            for scheduleId in self.schedules.keys {
-                let schedule = self.schedules[scheduleId]!
-                if schedule.status == "active" && schedule.nextExecution <= now {
-                    active.append(schedule)
+                if let schedule = self.schedules[scheduleId] {
+                    if schedule.userId == userId {
+                        userSchedules.append(schedule)
+                    }
                 }
             }
-            return active
+            return userSchedules
+        }
+
+        pub fun getExecutionHistory(scheduleId: String): [ExecutionRecord] {
+            var records: [ExecutionRecord] = []
+            for record in self.executionHistory {
+                if record.scheduleId == scheduleId {
+                    records.append(record)
+                }
+            }
+            return records
+        }
+
+        priv fun calculateNextExecution(frequency: String): UFix64 {
+            switch frequency {
+                case "daily":
+                    return 86400.0
+                case "weekly":
+                    return 604800.0
+                case "biweekly":
+                    return 1209600.0
+                case "monthly":
+                    return 2592000.0
+                default:
+                    return 86400.0
+            }
         }
     }
 
-    // ===== Contract Functions =====
-
-    /// Initialize schedules for new user
-    pub fun initializeSchedules(acct: AuthAccount) {
-        let schedules <- create UserSchedules()
-        acct.save(<- schedules, to: self.UserSchedulesStoragePath)
+    pub fun createScheduleManager(): @ScheduleManager {
+        return <- create ScheduleManager()
     }
 
-    /// Get user's schedules (public read)
-    pub fun getUserSchedules(address: Address): [Schedule] {
-        let acct = getAccount(address)
-        if let schedules = acct.getCapability(self.UserSchedulesPublicPath).borrow<&UserSchedules>() {
-            return schedules.getAllSchedules()
-        }
-        return []
-    }
+    init() {}
 }

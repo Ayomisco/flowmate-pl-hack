@@ -1,179 +1,154 @@
-import FungibleToken from 0xFungibleToken
-import FlowToken from 0xFlowToken
-
-/// VaultManager Contract
-/// Manages user's multi-vault financial system
-///
-/// Vault Types:
-/// - Available: Daily spending
-/// - Savings: Long-term savings (can be locked with deadline)
-/// - Emergency: Emergency fund (locked with withdrawal restrictions)
-/// - Staking: Staked assets (locked until unstake)
-///
-/// Key Features:
-/// - Independent balance tracking per vault
-/// - Lock/unlock mechanisms with timestamp-based deadlines
-/// - Transfer between vaults
-/// - Total balance calculation across all vaults
+import FungibleToken from 0xf233dcee88fe0abe
+import FlowToken from 0x7e60df042a9c0868
 
 pub contract VaultManager {
+    
+    pub event VaultCreated(userId: String, vaultType: String)
+    pub event VaultTransfer(fromVault: String, toVault: String, amount: UFix64)
+    pub event VaultLocked(userId: String, vaultType: String, lockedUntil: UFix64)
+    pub event VaultUnlocked(userId: String, vaultType: String)
+    pub event DepositToVault(userId: String, vaultType: String, amount: UFix64)
+    pub event WithdrawFromVault(userId: String, vaultType: String, amount: UFix64)
 
-    // ===== Events =====
-    pub event VaultsCreated(address: Address)
-    pub event VaultTransfer(from: String, to: String, amount: UFix64, timestamp: UFix64)
-    pub event VaultLocked(vaultType: String, lockedUntil: UFix64)
-    pub event VaultUnlocked(vaultType: String)
-    pub event DepositToVault(vaultType: String, amount: UFix64)
-    pub event WithdrawFromVault(vaultType: String, amount: UFix64)
-
-    // ===== Paths =====
-    pub let UserVaultsStoragePath: StoragePath
-    pub let UserVaultsPublicPath: PublicPath
-
-    init() {
-        self.UserVaultsStoragePath = /storage/flowmateUserVaults
-        self.UserVaultsPublicPath = /public/flowmateUserVaults
-    }
-
-    // ===== Structures =====
-
-    /// Individual vault with balance and lock status
     pub struct Vault {
-        pub let vaultType: String // "available", "savings", "emergency", "staking"
+        pub let vaultType: String // available | savings | emergency | staking
         pub var balance: UFix64
-        pub var lockedUntil: UFix64? // nil if unlocked, timestamp if locked
+        pub var lockedUntil: UFix64? // nil if unlocked
+        pub let createdAt: UFix64
 
         init(vaultType: String) {
             self.vaultType = vaultType
             self.balance = 0.0
             self.lockedUntil = nil
+            self.createdAt = getCurrentBlock().timestamp
         }
 
-        /// Check if vault is currently locked
-        pub fun isLocked(): Bool {
-            if let lockTime = self.lockedUntil {
-                return getCurrentBlock().timestamp < lockTime
-            }
-            return false
-        }
-    }
-
-    // ===== Resources =====
-
-    /// Resource to store user's vaults
-    pub resource UserVaults {
-        pub var vaults: {String: Vault}
-
-        init() {
-            self.vaults = {}
-            self.vaults["available"] = Vault(vaultType: "available")
-            self.vaults["savings"] = Vault(vaultType: "savings")
-            self.vaults["emergency"] = Vault(vaultType: "emergency")
-            self.vaults["staking"] = Vault(vaultType: "staking")
-        }
-
-        /// Deposit to specific vault
-        pub fun depositToVault(vaultType: String, amount: UFix64) {
+        pub fun deposit(amount: UFix64) {
             pre {
-                amount > 0.0 : "Deposit amount must be positive"
-                self.vaults[vaultType] != nil : "Invalid vault type"
+                amount > 0.0: "Deposit amount must be positive"
             }
-
-            self.vaults[vaultType]!.balance = self.vaults[vaultType]!.balance + amount
-            emit DepositToVault(vaultType: vaultType, amount: amount)
+            self.balance = self.balance + amount
         }
 
-        /// Withdraw from specific vault
-        pub fun withdrawFromVault(vaultType: String, amount: UFix64): UFix64 {
+        pub fun withdraw(amount: UFix64): UFix64 {
             pre {
-                amount > 0.0 : "Withdrawal amount must be positive"
-                self.vaults[vaultType] != nil : "Invalid vault type"
-                !self.vaults[vaultType]!.isLocked() : "Vault is locked"
-                self.vaults[vaultType]!.balance >= amount : "Insufficient balance"
+                amount > 0.0: "Withdrawal amount must be positive"
+                self.balance >= amount: "Insufficient balance"
+                self.lockedUntil == nil || (self.lockedUntil! <= getCurrentBlock().timestamp): "Vault is locked"
             }
-
-            self.vaults[vaultType]!.balance = self.vaults[vaultType]!.balance - amount
-            emit WithdrawFromVault(vaultType: vaultType, amount: amount)
+            self.balance = self.balance - amount
             return amount
         }
 
-        /// Transfer between vaults
-        pub fun transferBetweenVaults(from: String, to: String, amount: UFix64) {
+        pub fun lock(duration: UFix64) {
             pre {
-                amount > 0.0 : "Transfer amount must be positive"
-                self.vaults[from] != nil : "Invalid source vault"
-                self.vaults[to] != nil : "Invalid destination vault"
-                !self.vaults[from]!.isLocked() : "Source vault is locked"
-                self.vaults[from]!.balance >= amount : "Insufficient balance in source vault"
+                duration > 0.0: "Lock duration must be positive"
             }
-
-            self.vaults[from]!.balance = self.vaults[from]!.balance - amount
-            self.vaults[to]!.balance = self.vaults[to]!.balance + amount
-
-            emit VaultTransfer(from: from, to: to, amount: amount, timestamp: getCurrentBlock().timestamp)
+            self.lockedUntil = getCurrentBlock().timestamp + duration
         }
 
-        /// Lock a vault until specified timestamp
-        pub fun lockVault(vaultType: String, lockedUntil: UFix64) {
-            pre {
-                self.vaults[vaultType] != nil : "Invalid vault type"
-                lockedUntil > getCurrentBlock().timestamp : "Lock time must be in the future"
-            }
-
-            self.vaults[vaultType]!.lockedUntil = lockedUntil
-            emit VaultLocked(vaultType: vaultType, lockedUntil: lockedUntil)
+        pub fun unlock() {
+            self.lockedUntil = nil
         }
 
-        /// Unlock a vault
-        pub fun unlockVault(vaultType: String) {
-            pre {
-                self.vaults[vaultType] != nil : "Invalid vault type"
+        pub fun isLocked(): Bool {
+            if self.lockedUntil == nil {
+                return false
             }
-
-            self.vaults[vaultType]!.lockedUntil = nil
-            emit VaultUnlocked(vaultType: vaultType)
+            return self.lockedUntil! > getCurrentBlock().timestamp
         }
 
-        /// Get vault by type
+        pub fun getBalance(): UFix64 {
+            return self.balance
+        }
+    }
+
+    pub resource UserVaults {
+        pub var vaults: {String: Vault} // available | savings | emergency | staking
+
+        init() {
+            self.vaults = {}
+            self.createVault(vaultType: "available")
+            self.createVault(vaultType: "savings")
+            self.createVault(vaultType: "emergency")
+            self.createVault(vaultType: "staking")
+        }
+
+        pub fun createVault(vaultType: String) {
+            pre {
+                vaultType == "available" || vaultType == "savings" || vaultType == "emergency" || vaultType == "staking": "Invalid vault type"
+                self.vaults[vaultType] == nil: "Vault already exists"
+            }
+            self.vaults[vaultType] = Vault(vaultType: vaultType)
+            emit VaultCreated(userId: "", vaultType: vaultType)
+        }
+
         pub fun getVault(vaultType: String): Vault? {
             return self.vaults[vaultType]
         }
 
-        /// Get total balance across all vaults
+        pub fun depositToVault(vaultType: String, amount: UFix64) {
+            pre {
+                self.vaults[vaultType] != nil: "Vault does not exist"
+            }
+            self.vaults[vaultType]!.deposit(amount: amount)
+            emit DepositToVault(userId: "", vaultType: vaultType, amount: amount)
+        }
+
+        pub fun withdrawFromVault(vaultType: String, amount: UFix64): UFix64 {
+            pre {
+                self.vaults[vaultType] != nil: "Vault does not exist"
+            }
+            let withdrawn = self.vaults[vaultType]!.withdraw(amount: amount)
+            emit WithdrawFromVault(userId: "", vaultType: vaultType, amount: withdrawn)
+            return withdrawn
+        }
+
+        pub fun transferBetweenVaults(from: String, to: String, amount: UFix64) {
+            pre {
+                self.vaults[from] != nil: "Source vault does not exist"
+                self.vaults[to] != nil: "Destination vault does not exist"
+                amount > 0.0: "Transfer amount must be positive"
+            }
+            let withdrawn = self.withdrawFromVault(vaultType: from, amount: amount)
+            self.depositToVault(vaultType: to, amount: withdrawn)
+            emit VaultTransfer(fromVault: from, toVault: to, amount: withdrawn)
+        }
+
+        pub fun lockVault(vaultType: String, duration: UFix64) {
+            pre {
+                self.vaults[vaultType] != nil: "Vault does not exist"
+            }
+            self.vaults[vaultType]!.lock(duration: duration)
+            emit VaultLocked(userId: "", vaultType: vaultType, lockedUntil: self.vaults[vaultType]!.lockedUntil ?? 0.0)
+        }
+
+        pub fun unlockVault(vaultType: String) {
+            pre {
+                self.vaults[vaultType] != nil: "Vault does not exist"
+            }
+            self.vaults[vaultType]!.unlock()
+            emit VaultUnlocked(userId: "", vaultType: vaultType)
+        }
+
         pub fun getTotalBalance(): UFix64 {
             var total: UFix64 = 0.0
             for vaultType in self.vaults.keys {
-                total = total + self.vaults[vaultType]!.balance
+                if let vault = self.vaults[vaultType] {
+                    total = total + vault.getBalance()
+                }
             }
             return total
         }
 
-        /// Get all vault balances
-        pub fun getAllVaultBalances(): {String: UFix64} {
-            let balances: {String: UFix64} = {}
-            for vaultType in self.vaults.keys {
-                balances[vaultType] = self.vaults[vaultType]!.balance
-            }
-            return balances
+        pub fun getAllVaults(): {String: Vault} {
+            return self.vaults
         }
     }
 
-    // ===== Contract Functions =====
-
-    /// Create vaults for new user
-    pub fun createUserVaults(acct: AuthAccount) {
-        let vaults <- create UserVaults()
-        acct.save(<- vaults, to: self.UserVaultsStoragePath)
-
-        emit VaultsCreated(address: acct.address)
+    pub fun createUserVaults(): @UserVaults {
+        return <- create UserVaults()
     }
 
-    /// Get user vault balances (public read)
-    pub fun getUserVaultBalances(address: Address): {String: UFix64} {
-        let acct = getAccount(address)
-        if let vaults = acct.getCapability(self.UserVaultsPublicPath).borrow<&UserVaults>() {
-            return vaults.getAllVaultBalances()
-        }
-        return {}
-    }
+    init() {}
 }

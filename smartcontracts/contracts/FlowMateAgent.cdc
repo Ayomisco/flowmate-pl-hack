@@ -1,205 +1,210 @@
-import FungibleToken from 0xFungibleToken
-import FlowToken from 0xFlowToken
-
-/// FlowMateAgent Contract
-/// Manages user permissions, autonomy modes, and permission boundaries for the FlowMate system
-///
-/// Key Features:
-/// - User permission boundaries (daily limits, whitelisted recipients)
-/// - Three autonomy modes: manual, assist (AI suggestions), autopilot (AI execution)
-/// - Delegated key system for authorized operations
-/// - Immutable transaction logging for audit trail
-/// - Automatic daily limit reset every 24 hours
+import FungibleToken from 0xf233dcee88fe0abe
+import FlowToken from 0x7e60df042a9c0868
 
 pub contract FlowMateAgent {
+    
+    // Events
+    pub event UserRegistered(userId: String, address: Address)
+    pub event AutonomyModeUpdated(userId: String, mode: String)
+    pub event RecipientWhitelisted(userId: String, recipient: Address)
+    pub event TransactionValidated(userId: String, recipient: Address, amount: UFix64, allowed: Bool)
+    pub event AutomationPaused(userId: String)
+    pub event AutomationResumed(userId: String)
 
-    // ===== Events =====
-    pub event UserRegistered(address: Address, autonomyMode: String)
-    pub event AutonomyModeUpdated(address: Address, newMode: String)
-    pub event RecipientWhitelisted(address: Address, recipient: Address)
-    pub event RecipientRemoved(address: Address, recipient: Address)
-    pub event TransactionValidated(address: Address, txHash: String, approved: Bool)
-    pub event DailyLimitReset(address: Address, resetTime: UFix64)
-    pub event AutomationPaused(address: Address)
-    pub event AutomationResumed(address: Address)
-
-    // ===== Paths =====
-    pub let UserConfigStoragePath: StoragePath
-    pub let UserConfigPublicPath: PublicPath
-    pub let DelegatedKeyStoragePath: StoragePath
-    pub let TransactionLogStoragePath: StoragePath
-
-    init() {
-        self.UserConfigStoragePath = /storage/flowmateUserConfig
-        self.UserConfigPublicPath = /public/flowmateUserConfig
-        self.DelegatedKeyStoragePath = /storage/flowmateDelegatedKey
-        self.TransactionLogStoragePath = /storage/flowmateTransactionLog
-    }
-
-    // ===== Structures =====
-
-    /// User configuration including autonomy mode and permission boundaries
+    // Structs
     pub struct UserConfig {
-        pub var autonomyMode: String // "manual", "assist", or "autopilot"
-        pub var dailyLimit: UFix64
-        pub var dailyUsed: UFix64
-        pub var dailyResetAt: UFix64
-        pub var automationPaused: Bool
-        pub var whitelistedRecipients: [Address]
-        pub var createdAt: UFix64
+        pub let userId: String
+        pub let autonomyMode: String // manual | assist | autopilot
+        pub let dailyLimit: UFix64
+        pub let dailySpent: UFix64
+        pub let lastReset: UFix64
+        pub let whitelistedRecipients: [Address]
+        pub let isAutomationPaused: Bool
 
-        init(autonomyMode: String, dailyLimit: UFix64) {
+        init(
+            userId: String,
+            autonomyMode: String,
+            dailyLimit: UFix64,
+            dailySpent: UFix64,
+            lastReset: UFix64,
+            whitelistedRecipients: [Address],
+            isAutomationPaused: Bool
+        ) {
+            self.userId = userId
             self.autonomyMode = autonomyMode
             self.dailyLimit = dailyLimit
-            self.dailyUsed = 0.0
-            self.dailyResetAt = getCurrentBlock().timestamp + 86400.0 // 24 hours
-            self.automationPaused = false
-            self.whitelistedRecipients = []
-            self.createdAt = getCurrentBlock().timestamp
+            self.dailySpent = dailySpent
+            self.lastReset = lastReset
+            self.whitelistedRecipients = whitelistedRecipients
+            self.isAutomationPaused = isAutomationPaused
         }
     }
 
-    /// Delegated key for AI agent authorization
     pub struct DelegatedKey {
-        pub let keyId: UInt32
-        pub let delegatedTo: Address // AI agent/service address
-        pub let expiresAt: UFix64
-        pub let scope: String // e.g., "transfer", "stake", "swap"
-        pub var active: Bool
+        pub let keyId: UInt64
+        pub let publicKey: String
+        pub let weight: UInt64
+        pub let createdAt: UFix64
 
-        init(keyId: UInt32, delegatedTo: Address, expiresAt: UFix64, scope: String) {
+        init(keyId: UInt64, publicKey: String, weight: UInt64, createdAt: UFix64) {
             self.keyId = keyId
-            self.delegatedTo = delegatedTo
-            self.expiresAt = expiresAt
-            self.scope = scope
-            self.active = true
+            self.publicKey = publicKey
+            self.weight = weight
+            self.createdAt = createdAt
         }
     }
 
-    /// Immutable transaction record for audit trail
     pub struct TransactionRecord {
-        pub let txHash: String
-        pub let fromAddress: Address
-        pub let toAddress: Address
+        pub let id: String
+        pub let userId: String
+        pub let from: Address
+        pub let to: Address
         pub let amount: UFix64
         pub let timestamp: UFix64
-        pub let type: String // "send", "swap", "stake", etc.
-        pub let status: String // "pending", "confirmed", "failed"
+        pub let txHash: String
+        pub let status: String
 
-        init(txHash: String, from: Address, to: Address, amount: UFix64, type: String) {
-            self.txHash = txHash
-            self.fromAddress = from
-            self.toAddress = to
+        init(
+            id: String,
+            userId: String,
+            from: Address,
+            to: Address,
+            amount: UFix64,
+            timestamp: UFix64,
+            txHash: String,
+            status: String
+        ) {
+            self.id = id
+            self.userId = userId
+            self.from = from
+            self.to = to
             self.amount = amount
-            self.timestamp = getCurrentBlock().timestamp
-            self.type = type
-            self.status = "confirmed"
+            self.timestamp = timestamp
+            self.txHash = txHash
+            self.status = status
         }
     }
 
-    // ===== Resources =====
-
-    /// Resource to store user configuration
-    pub resource UserConfigResource {
+    pub resource UserAccount {
         pub var config: UserConfig
         pub var delegatedKeys: [DelegatedKey]
-        pub var transactionLog: [TransactionRecord]
+        pub var transactionHistory: [TransactionRecord]
 
-        init(autonomyMode: String, dailyLimit: UFix64) {
-            self.config = UserConfig(autonomyMode: autonomyMode, dailyLimit: dailyLimit)
+        init(userId: String, autonomyMode: String, dailyLimit: UFix64) {
+            self.config = UserConfig(
+                userId: userId,
+                autonomyMode: autonomyMode,
+                dailyLimit: dailyLimit,
+                dailySpent: 0.0,
+                lastReset: getCurrentBlock().timestamp,
+                whitelistedRecipients: [],
+                isAutomationPaused: false
+            )
             self.delegatedKeys = []
-            self.transactionLog = []
+            self.transactionHistory = []
         }
 
-        /// Update user autonomy mode
-        pub fun updateAutonomyMode(_ newMode: String) {
+        pub fun updateAutonomyMode(mode: String) {
             pre {
-                newMode == "manual" || newMode == "assist" || newMode == "autopilot" : "Invalid autonomy mode"
+                mode == "manual" || mode == "assist" || mode == "autopilot": "Invalid autonomy mode"
             }
-            self.config.autonomyMode = newMode
+            self.config.autonomyMode = mode
+            emit AutonomyModeUpdated(userId: self.config.userId, mode: mode)
         }
 
-        /// Whitelist a recipient address
-        pub fun whitelistRecipient(_ address: Address) {
+        pub fun whitelistRecipient(address: Address) {
             if !self.config.whitelistedRecipients.contains(address) {
                 self.config.whitelistedRecipients.append(address)
+                emit RecipientWhitelisted(userId: self.config.userId, recipient: address)
             }
         }
 
-        /// Remove whitelisted recipient
-        pub fun removeRecipient(_ address: Address) {
-            self.config.whitelistedRecipients.remove(at: self.config.whitelistedRecipients.firstIndex(of: address) ?? panic("Recipient not found"))
-        }
-
-        /// Add delegated key for AI authorization
-        pub fun addDelegatedKey(_ key: DelegatedKey) {
-            self.delegatedKeys.append(key)
-        }
-
-        /// Record transaction for audit trail
-        pub fun recordTransaction(_ record: TransactionRecord) {
-            self.transactionLog.append(record)
-        }
-
-        /// Reset daily limit if 24 hours have passed
-        pub fun resetDailyLimitIfNeeded() {
-            if getCurrentBlock().timestamp >= self.config.dailyResetAt {
-                self.config.dailyUsed = 0.0
-                self.config.dailyResetAt = getCurrentBlock().timestamp + 86400.0
-            }
-        }
-
-        /// Check if transfer is allowed within daily limit and whitelist
-        pub fun validateTransfer(to: Address, amount: UFix64): Bool {
-            self.resetDailyLimitIfNeeded()
-
-            // Check daily limit
-            if self.config.dailyUsed + amount > self.config.dailyLimit {
-                return false
+        pub fun validateTransfer(recipient: Address, amount: UFix64): Bool {
+            // Reset daily limit if 24 hours have passed
+            let now = getCurrentBlock().timestamp
+            if now - self.config.lastReset >= 86400.0 {
+                self.config.dailySpent = 0.0
+                self.config.lastReset = now
             }
 
-            // Check whitelist (if any recipients are whitelisted, transfer only allowed to whitelisted)
-            if self.config.whitelistedRecipients.length > 0 {
-                if !self.config.whitelistedRecipients.contains(to) {
+            // Check whitelist
+            if self.config.autonomyMode == "autopilot" || self.config.autonomyMode == "assist" {
+                if !self.config.whitelistedRecipients.contains(recipient) {
+                    emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: false)
                     return false
                 }
             }
 
+            // Check daily limit
+            if self.config.dailySpent + amount > self.config.dailyLimit {
+                emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: false)
+                return false
+            }
+
+            self.config.dailySpent = self.config.dailySpent + amount
+            emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: true)
             return true
         }
 
-        /// Update daily used amount
-        pub fun updateDailyUsed(_ amount: UFix64) {
-            self.config.dailyUsed = self.config.dailyUsed + amount
+        pub fun addDelegatedKey(publicKey: String, weight: UInt64) {
+            let keyId = UInt64(self.delegatedKeys.length)
+            let key = DelegatedKey(
+                keyId: keyId,
+                publicKey: publicKey,
+                weight: weight,
+                createdAt: getCurrentBlock().timestamp
+            )
+            self.delegatedKeys.append(key)
         }
 
-        /// Pause all automation
+        pub fun recordTransaction(
+            id: String,
+            from: Address,
+            to: Address,
+            amount: UFix64,
+            txHash: String,
+            status: String
+        ) {
+            let record = TransactionRecord(
+                id: id,
+                userId: self.config.userId,
+                from: from,
+                to: to,
+                amount: amount,
+                timestamp: getCurrentBlock().timestamp,
+                txHash: txHash,
+                status: status
+            )
+            self.transactionHistory.append(record)
+        }
+
         pub fun pauseAutomation() {
-            self.config.automationPaused = true
+            self.config.isAutomationPaused = true
+            emit AutomationPaused(userId: self.config.userId)
         }
 
-        /// Resume automation
         pub fun resumeAutomation() {
-            self.config.automationPaused = false
+            self.config.isAutomationPaused = false
+            emit AutomationResumed(userId: self.config.userId)
+        }
+
+        pub fun getConfig(): UserConfig {
+            return self.config
+        }
+
+        pub fun getTransactionHistory(): [TransactionRecord] {
+            return self.transactionHistory
         }
     }
 
-    // ===== Contract Functions =====
-
-    /// Register a new user
-    pub fun registerUser(acct: AuthAccount, initialMode: String) {
-        let config <- create UserConfigResource(autonomyMode: initialMode, dailyLimit: 10000.0)
-        acct.save(<- config, to: self.UserConfigStoragePath)
-
-        emit UserRegistered(address: acct.address, autonomyMode: initialMode)
-    }
-
-    /// Get user config (public read)
-    pub fun getUserConfig(address: Address): UserConfig? {
-        let acct = getAccount(address)
-        if let resource = acct.getCapability(self.UserConfigPublicPath).borrow<&UserConfigResource>() {
-            return resource.config
+    pub fun registerUser(userId: String, autonomyMode: String, dailyLimit: UFix64): @UserAccount {
+        pre {
+            autonomyMode == "manual" || autonomyMode == "assist" || autonomyMode == "autopilot": "Invalid autonomy mode"
+            dailyLimit > 0.0: "Daily limit must be positive"
         }
-        return nil
+        emit UserRegistered(userId: userId, address: getCurrentBlock().timestamp as Address)
+        return <- create UserAccount(userId: userId, autonomyMode: autonomyMode, dailyLimit: dailyLimit)
     }
+
+    init() {}
 }

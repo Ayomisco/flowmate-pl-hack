@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,244 +7,177 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enums
-enum RuleType {
-  save
-  send
-  receive
-  swap
-  stake
-  dca
-  bill
-}
-
-enum RuleStatus {
-  active
-  paused
-  completed
-}
-
-enum VaultType {
-  available
-  savings
-  emergency
-  staking
-}
-
-enum TransactionStatus {
-  pending
-  confirmed
-  failed
-}
-
-enum TransactionType {
-  send
-  receive
-  transfer
-  swap
-  stake
-}
-
-enum AutonomyMode {
-  manual
-  assist
-  autopilot
-}
-
-enum NotificationType {
-  action_executed
-  payment_sent
-  goal_progress
-  alert
-}
-
-// User
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String?
-  flowAddress   String   @unique
-  magicUserId   String?  @unique
-  autonomyMode  AutonomyMode @default(manual)
-  dailyLimit    Float    @default(10000)
-  dailyUsed     Float    @default(0)
-  dailyResetAt  DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  flowAddress       String   @unique
+  magicUserId       String   @unique
+  autonomyMode      String   @default("manual") // manual | assist | autopilot
+  dailyLimit        Float    @default(10000)
+  dailySpent        Float    @default(0)
+  dailyResetTime    DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  // Relations
-  rules              Rule[]
-  vaults             Vault[]
-  transactions       Transaction[]
-  goals              Goal[]
-  chatMessages       ChatMessage[]
-  notifications      Notification[]
-
-  @@index([email])
-  @@index([flowAddress])
+  rules             Rule[]
+  transactions      Transaction[]
+  vaults            Vault[]
+  goals             Goal[]
+  chatMessages      ChatMessage[]
+  notifications     Notification[]
+  whitelistedRecipients WhitelistedRecipient[]
 }
 
-// Financial Rule
 model Rule {
-  id             String   @id @default(cuid())
-  userId         String
-  type           RuleType
-  status         RuleStatus @default(active)
-  name           String
-  description    String?
-  config         Json
-  nextExecution  DateTime?
-  lastExecution  DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userId            String
+  type              String   // save | send | receive | swap | stake | dca | bill
+  status            String   @default("active") // active | paused | completed
+  config            Json     // Dynamic config based on type
+  nextExecution     DateTime?
+  lastExecution     DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions   Transaction[]
-  schedules      ScheduledTransaction[]
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledTransaction ScheduledTransaction?
+  transactions      Transaction[]
 
   @@index([userId])
-  @@index([status])
   @@index([type])
 }
 
-// Scheduled Transaction (Flow Forte Integration)
 model ScheduledTransaction {
-  id             String   @id @default(cuid())
-  userId         String
-  ruleId         String
-  scheduleId     String   @unique// On-chain schedule ID
-  frequency      String   // daily, weekly, monthly, custom
-  dayOfWeek      Int?     // 0-6 for weekly
-  time           String?  // HH:mm format
-  status         RuleStatus @default(active)
-  nextExecution  DateTime
-  executionCount Int      @default(0)
-  lastExecution  DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String   @id @default(cuid())
+  ruleId            String   @unique
+  scheduleId        String   @unique
+  frequency         String   // daily | weekly | monthly | biweekly
+  dayOfWeek         Int?     // 0-6 for weekly
+  time              String?  // HH:mm format
+  status            String   @default("active")
+  nextExecution     DateTime
+  executionCount    Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  // Relations
-  rule           Rule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  rule              Rule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  executionRecords  ExecutionRecord[]
 
-  @@index([ruleId])
-  @@index([status])
-  @@index([nextExecution])
+  @@index([scheduleId])
 }
 
-// Vault (Multi-vault system)
-model Vault {
-  id             String   @id @default(cuid())
-  userId         String
-  type           VaultType
-  balance        Float    @default(0)
-  lockedUntil    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model ExecutionRecord {
+  id                    String   @id @default(cuid())
+  scheduledTransactionId String
+  timestamp             DateTime @default(now())
+  success               Boolean
+  message               String?
+  txHash                String?
 
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledTransaction  ScheduledTransaction @relation(fields: [scheduledTransactionId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledTransactionId])
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  userId            String
+  ruleId            String?
+  txHash            String   @unique
+  type              String   // send | receive | swap | stake | dca | bill
+  fromAddress       String
+  toAddress         String
+  amount            Float
+  token             String   @default("FLOW")
+  status            String   @default("pending") // pending | confirmed | failed
+  explorerUrl       String?
+  metadata          Json?
+  confirmedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rule              Rule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([txHash])
+}
+
+model Vault {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String   // available | savings | emergency | staking
+  balance           Float    @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, type])
   @@index([userId])
 }
 
-// Goal
 model Goal {
-  id             String   @id @default(cuid())
-  userId         String
-  name           String
-  targetAmount   Float
-  currentAmount  Float    @default(0)
-  deadline       DateTime
-  status         RuleStatus @default(active)
-  category       String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userId            String
+  name              String
+  targetAmount      Float
+  currentAmount     Float    @default(0)
+  deadline          DateTime
+  status            String   @default("active") // active | achieved | expired
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([status])
 }
 
-// Transaction (Blockchain Audit Trail)
-model Transaction {
-  id             String   @id @default(cuid())
-  userId         String
-  ruleId         String?
-  txHash         String   @unique
-  type           TransactionType
-  fromAddress    String
-  toAddress      String
-  amount         Float
-  token          String   @default("FLOW")
-  status         TransactionStatus @default(pending)
-  estimatedCost  Float    @default(0)
-  actualCost     Float?
-  metadata       Json?
-  explorerUrl    String?
-  confirmedAt    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  rule           Rule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
-
-  @@index([userId])
-  @@index([status])
-  @@index([type])
-  @@index([txHash])
-  @@index([createdAt])
-}
-
-// Chat Message (AI Conversation History)
 model ChatMessage {
-  id             String   @id @default(cuid())
-  userId         String
-  role           String   // user | agent
-  content        String   @db.Text
-  parsedIntent   Json?
-  confidenceScore Float?
-  createdAt      DateTime @default(now())
+  id                String   @id @default(cuid())
+  userId            String
+  role              String   // user | agent
+  content           String   @db.Text
+  parsedIntent      Json?    // Structured intent parsed by AI
+  confidenceScore   Float?
+  createdAt         DateTime @default(now())
 
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
 }
 
-// Notification
 model Notification {
-  id             String   @id @default(cuid())
-  userId         String
-  type           NotificationType
-  title          String
-  body           String   @db.Text
-  read           Boolean  @default(false)
-  metadata       Json?
-  createdAt      DateTime @default(now())
-  readAt         DateTime?
+  id                String   @id @default(cuid())
+  userId            String
+  type              String   // action_executed | payment_sent | goal_progress | alert
+  title             String
+  body              String   @db.Text
+  read              Boolean  @default(false)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([read])
-  @@index([createdAt])
 }
 
-// Whitelisted Recipient (Permission Boundary)
 model WhitelistedRecipient {
-  id             String   @id @default(cuid())
-  userId         String
-  recipientAddr  String
-  alias          String?
-  addedAt        DateTime @default(now())
+  id                String   @id @default(cuid())
+  userId            String
+  address           String
+  nickname          String?
+  createdAt         DateTime @default(now())
 
-  @@unique([userId, recipientAddr])
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, address])
   @@index([userId])
 }

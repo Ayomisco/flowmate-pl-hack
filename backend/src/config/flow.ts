@@ -1,80 +1,51 @@
-import * as fcl from "@onflow/fcl";
-import { transaction, script } from "@onflow/fcl";
-import config from "./env";
+import * as fcl from '@onflow/fcl';
+import { env } from './env.js';
 
-// Initialize FCL
 fcl.config({
-  "accessNode.api": config.flowAccessNode,
-  "discovery.wallet": `${config.flowAccessNode.replace("rest", "http")}/flow/testnet/wallets/discovery`,
+  'flow.network': env.flowNetwork,
+  'accessNode.api': env.flowAccessNode,
 });
 
-interface AuthorizerOptions {
-  addr: string;
-  keyId: number;
-  signingFunction: (signable: any) => Promise<any>;
-}
-
-/**
- * Build authorization function for signing transactions
- */
-export const buildAuthorization = (
-  addr: string,
-  keyId: number,
-  privateKey: string
-): AuthorizerOptions => {
+export const buildAuthorization = async (account: any) => {
   return {
-    addr: fcl.sansPrefix(addr),
-    keyId,
-    signingFunction: async (signable: any) => {
-      // This would use FCL's signing utilities
-      // For now, returns the signing function reference
-      return {
-        signature: privateKey, // Placeholder - actual signing handled by FCL
-      };
-    },
+    ...account,
+    tempId: `${account.address}-${env.flowNetwork}`,
+    addr: fcl.signer.addressAsHexString(account.address),
+    keyId: 0,
+    signingFunction: async (signable: any) => ({
+      f_type: 'SignedData',
+      f_vsn: '1.0.0',
+      signature: await fcl.signer.sign(Buffer.from(signable.message, 'hex'), {
+        hashAlgo: fcl.HashAlgorithm.SHA3_256,
+        signatureAlgo: fcl.SignatureAlgorithm.ECDSA_P256,
+        privateKey: env.flowAccountPrivateKey,
+      }),
+    }),
   };
 };
 
-/**
- * Query Flow blockchain (read-only)
- */
-export const queryFlow = async (cadenceScript: string, args: any[] = []): Promise<any> => {
-  try {
-    const result = await fcl.query({
-      cadence: cadenceScript,
-      args: (arg: any, t: any) => args.map((a) => arg(a, t)),
-    });
-    return result;
-  } catch (error) {
-    console.error("Flow query error:", error);
-    throw error;
-  }
+export const queryFlow = async (script: string, args: any[] = []) => {
+  return fcl.query({
+    cadence: script,
+    args: (arg: any, t: any) => args.map((a, i) => arg(a, t.String)),
+  });
 };
 
-/**
- * Execute transaction on Flow blockchain
- */
 export const executeFlow = async (
   cadence: string,
   args: any[] = [],
-  authorizers: AuthorizerOptions[] = []
-): Promise<string> => {
-  try {
-    const txId = await fcl.mutate({
-      cadence,
-      args: (arg: any, t: any) => args.map((a) => arg(a, t)),
-      proposer: authorizers[0],
-      payer: authorizers[0],
-      authorizations: authorizers,
-      limit: 9999,
-    });
+  authorizers: string[] = [env.flowAccountAddress]
+) => {
+  const limit = 9999;
 
-    // Wait for transaction to be sealed
-    return await fcl.tx(txId).onceSealed();
-  } catch (error) {
-    console.error("Flow transaction error:", error);
-    throw error;
-  }
+  return fcl.mutate({
+    cadence,
+    args: (arg: any, t: any) => args.map((a, i) => arg(a, t.String)),
+    proposer: fcl.authz,
+    payer: fcl.authz,
+    authorizations: [fcl.authz],
+    limit,
+  });
 };
 
 export default {
