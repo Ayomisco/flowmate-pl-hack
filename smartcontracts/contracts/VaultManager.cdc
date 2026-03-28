@@ -91,7 +91,9 @@ access(all) contract VaultManager {
             pre {
                 self.vaults[vaultType] != nil: "Vault does not exist"
             }
-            self.vaults[vaultType]!.deposit(amount: amount)
+            var vault = self.vaults[vaultType]!
+            vault.deposit(amount: amount)
+            self.vaults[vaultType] = vault
             emit DepositToVault(userId: "", vaultType: vaultType, amount: amount)
         }
 
@@ -99,7 +101,9 @@ access(all) contract VaultManager {
             pre {
                 self.vaults[vaultType] != nil: "Vault does not exist"
             }
-            let withdrawn = self.vaults[vaultType]!.withdraw(amount: amount)
+            var vault = self.vaults[vaultType]!
+            let withdrawn = vault.withdraw(amount: amount)
+            self.vaults[vaultType] = vault
             emit WithdrawFromVault(userId: "", vaultType: vaultType, amount: withdrawn)
             return withdrawn
         }
@@ -119,15 +123,20 @@ access(all) contract VaultManager {
             pre {
                 self.vaults[vaultType] != nil: "Vault does not exist"
             }
-            self.vaults[vaultType]!.lock(duration: duration)
-            emit VaultLocked(userId: "", vaultType: vaultType, lockedUntil: self.vaults[vaultType]!.lockedUntil ?? 0.0)
+            var vault = self.vaults[vaultType]!
+            vault.lock(duration: duration)
+            let lockedUntil = vault.lockedUntil ?? 0.0
+            self.vaults[vaultType] = vault
+            emit VaultLocked(userId: "", vaultType: vaultType, lockedUntil: lockedUntil)
         }
 
         access(all) fun unlockVault(vaultType: String) {
             pre {
                 self.vaults[vaultType] != nil: "Vault does not exist"
             }
-            self.vaults[vaultType]!.unlock()
+            var vault = self.vaults[vaultType]!
+            vault.unlock()
+            self.vaults[vaultType] = vault
             emit VaultUnlocked(userId: "", vaultType: vaultType)
         }
 

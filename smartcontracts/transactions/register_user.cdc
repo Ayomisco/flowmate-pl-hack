@@ -1,33 +1,27 @@
-import FlowMateAgent from 0x01
-import VaultManager from 0x02
+import FlowMateAgent from 0xc26f3fa2883a46db
+import VaultManager from 0xc26f3fa2883a46db
 
 transaction(userId: String, autonomyMode: String, dailyLimit: UFix64) {
-    prepare(signer: AuthAccount) {
-        // Register user with FlowMateAgent
+    prepare(signer: auth(Storage, Capabilities) &Account) {
         let userAccount <- FlowMateAgent.registerUser(
             userId: userId,
             autonomyMode: autonomyMode,
-            dailyLimit: dailyLimit
+            dailyLimit: dailyLimit,
+            address: signer.address
         )
-        
-        // Create vaults for user
+
         let userVaults <- VaultManager.createUserVaults()
-        
-        // Save resources to account
-        signer.save(<- userAccount, to: /storage/flowmateUserAccount)
-        signer.save(<- userVaults, to: /storage/userVaults)
-        
-        // Create public links
-        signer.link<&FlowMateAgent.UserAccount>(
-            /public/flowmateUserAccount,
-            target: /storage/flowmateUserAccount
-        )
-        signer.link<&VaultManager.UserVaults>(
-            /public/userVaults,
-            target: /storage/userVaults
-        )
+
+        signer.storage.save(<- userAccount, to: /storage/flowmateUserAccount)
+        signer.storage.save(<- userVaults, to: /storage/userVaults)
+
+        let accountCap = signer.capabilities.storage.issue<&FlowMateAgent.UserAccount>(/storage/flowmateUserAccount)
+        signer.capabilities.publish(accountCap, at: /public/flowmateUserAccount)
+
+        let vaultsCap = signer.capabilities.storage.issue<&VaultManager.UserVaults>(/storage/userVaults)
+        signer.capabilities.publish(vaultsCap, at: /public/userVaults)
     }
-    
+
     execute {
         log("User registered successfully")
     }

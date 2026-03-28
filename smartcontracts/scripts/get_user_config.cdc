@@ -1,8 +1,13 @@
-import FlowMateAgent from 0xFlowMateAgent
+import FlowMateAgent from 0xc26f3fa2883a46db
 
-/// Script to retrieve user configuration
-/// Read-only query - does not create a transaction
+/// Get user agent config for a given address
+access(all) fun main(addr: Address): FlowMateAgent.UserConfig? {
+    let account = getAccount(addr)
+    let userAccountCap = account.capabilities.borrow<&FlowMateAgent.UserAccount>(/public/flowmateUserAccount)
 
-pub fun main(addr: Address): FlowMateAgent.UserConfig? {
-  return FlowMateAgent.getUserConfig(address: addr)
+    if userAccountCap == nil {
+        return nil
+    }
+
+    return userAccountCap!.getConfig()
 }

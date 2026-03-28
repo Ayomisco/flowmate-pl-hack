@@ -1,25 +1,43 @@
 {
-  "networks": {
-    "testnet": {
-      "host": "https://rest-testnet.onflow.org"
-    },
-    "mainnet": {
-      "host": "https://rest-mainnet.onflow.org"
-    }
-  },
-  "accounts": {
-    "my-testnet-account": {
-      "address": "0xc26f3fa2883a46db",
-      "key": "d7115bde5b9dc30973feeefc9dc18ee7923d3667542032cdcf2a789294ac4cbc"
-    }
-  },
-  "deployments": {
-    "testnet": {
-      "my-testnet-account": [
-        "FlowMateAgent",
-        "VaultManager",
-        "ScheduledTransactions"
-      ]
-    }
-  }
+	"contracts": {
+		"FlowMateAgent": "contracts/FlowMateAgent.cdc",
+		"ScheduledTransactions": "contracts/ScheduledTransactions.cdc",
+		"VaultManager": "contracts/VaultManager.cdc"
+	},
+	"networks": {
+		"emulator": "127.0.0.1:3569",
+		"mainnet": "access.mainnet.nodes.onflow.org:9000",
+		"testnet": "access.devnet.nodes.onflow.org:9000"
+	},
+	"accounts": {
+		"emulator-account": {
+			"address": "f8d6e0586b0a20c7",
+			"key": "2eab2718734a41f56ef2ff34ca2955026093abc31e99984db394170a17ea839b"
+		},
+		"my-testnet-account": {
+			"address": "c26f3fa2883a46db",
+			"key": {
+				"type": "hex",
+				"signatureAlgorithm": "ECDSA_secp256k1",
+				"hashAlgorithm": "SHA2_256",
+				"privateKey": "d7115bde5b9dc30973feeefc9dc18ee7923d3667542032cdcf2a789294ac4cbc"
+			}
+		}
+	},
+	"deployments": {
+		"emulator": {
+			"emulator-account": [
+				"FlowMateAgent",
+				"VaultManager",
+				"ScheduledTransactions"
+			]
+		},
+		"testnet": {
+			"my-testnet-account": [
+				"FlowMateAgent",
+				"VaultManager",
+				"ScheduledTransactions"
+			]
+		}
+	}
 }

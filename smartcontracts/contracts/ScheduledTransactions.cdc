@@ -40,6 +40,11 @@ access(all) contract ScheduledTransactions {
             self.nextExecution = now + interval
         }
 
+        access(all) fun markExecuted() {
+            self.executionCount = self.executionCount + 1
+            self.updateNextExecution()
+        }
+
         access(all) fun getFrequencyInterval(): UFix64 {
             switch self.frequency {
                 case "daily":
@@ -117,7 +122,7 @@ access(all) contract ScheduledTransactions {
             pre {
                 self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-            let schedule = self.schedules[scheduleId]!
+            var schedule = self.schedules[scheduleId]!
 
             if !schedule.isActive {
                 panic("Schedule is not active")
@@ -153,8 +158,8 @@ access(all) contract ScheduledTransactions {
             }
 
             if success {
-                schedule.executionCount = schedule.executionCount + 1
-                schedule.updateNextExecution()
+                schedule.markExecuted()
+                self.schedules[scheduleId] = schedule
             }
 
             let record = ExecutionRecord(
@@ -172,7 +177,9 @@ access(all) contract ScheduledTransactions {
             pre {
                 self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-            self.schedules[scheduleId]!.pause()
+            var schedule = self.schedules[scheduleId]!
+            schedule.pause()
+            self.schedules[scheduleId] = schedule
             emit SchedulePaused(scheduleId: scheduleId)
         }
 
@@ -180,7 +187,9 @@ access(all) contract ScheduledTransactions {
             pre {
                 self.schedules[scheduleId] != nil: "Schedule does not exist"
             }
-            self.schedules[scheduleId]!.resume()
+            var schedule = self.schedules[scheduleId]!
+            schedule.resume()
+            self.schedules[scheduleId] = schedule
             emit ScheduleResumed(scheduleId: scheduleId)
         }
 

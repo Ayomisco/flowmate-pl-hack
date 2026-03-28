@@ -11,10 +11,10 @@ access(all) contract FlowMateAgent {
     access(all) event AutomationPaused(userId: String)
     access(all) event AutomationResumed(userId: String)
 
-    // Structs
+    // Read-only config snapshot returned by getConfig()
     access(all) struct UserConfig {
         access(all) let userId: String
-        access(all) let autonomyMode: String // manual | assist | autopilot
+        access(all) let autonomyMode: String
         access(all) let dailyLimit: UFix64
         access(all) let dailySpent: UFix64
         access(all) let lastReset: UFix64
@@ -85,21 +85,26 @@ access(all) contract FlowMateAgent {
         }
     }
 
+    // Mutable fields live directly in the resource to allow assignment in Cadence 1.0
     access(all) resource UserAccount {
-        access(all) var config: UserConfig
+        access(all) let userId: String
+        access(all) var autonomyMode: String
+        access(all) let dailyLimit: UFix64
+        access(all) var dailySpent: UFix64
+        access(all) var lastReset: UFix64
+        access(all) var whitelistedRecipients: [Address]
+        access(all) var isAutomationPaused: Bool
         access(all) var delegatedKeys: [DelegatedKey]
         access(all) var transactionHistory: [TransactionRecord]
 
         init(userId: String, autonomyMode: String, dailyLimit: UFix64) {
-            self.config = UserConfig(
-                userId: userId,
-                autonomyMode: autonomyMode,
-                dailyLimit: dailyLimit,
-                dailySpent: 0.0,
-                lastReset: getCurrentBlock().timestamp,
-                whitelistedRecipients: [],
-                isAutomationPaused: false
-            )
+            self.userId = userId
+            self.autonomyMode = autonomyMode
+            self.dailyLimit = dailyLimit
+            self.dailySpent = 0.0
+            self.lastReset = getCurrentBlock().timestamp
+            self.whitelistedRecipients = []
+            self.isAutomationPaused = false
             self.delegatedKeys = []
             self.transactionHistory = []
         }
@@ -108,41 +113,38 @@ access(all) contract FlowMateAgent {
             pre {
                 mode == "manual" || mode == "assist" || mode == "autopilot": "Invalid autonomy mode"
             }
-            self.config.autonomyMode = mode
-            emit AutonomyModeUpdated(userId: self.config.userId, mode: mode)
+            self.autonomyMode = mode
+            emit AutonomyModeUpdated(userId: self.userId, mode: mode)
         }
 
         access(all) fun whitelistRecipient(address: Address) {
-            if !self.config.whitelistedRecipients.contains(address) {
-                self.config.whitelistedRecipients.append(address)
-                emit RecipientWhitelisted(userId: self.config.userId, recipient: address)
+            if !self.whitelistedRecipients.contains(address) {
+                self.whitelistedRecipients.append(address)
+                emit RecipientWhitelisted(userId: self.userId, recipient: address)
             }
         }
 
         access(all) fun validateTransfer(recipient: Address, amount: UFix64): Bool {
-            // Reset daily limit if 24 hours have passed
             let now = getCurrentBlock().timestamp
-            if now - self.config.lastReset >= 86400.0 {
-                self.config.dailySpent = 0.0
-                self.config.lastReset = now
+            if now - self.lastReset >= 86400.0 {
+                self.dailySpent = 0.0
+                self.lastReset = now
             }
 
-            // Check whitelist
-            if self.config.autonomyMode == "autopilot" || self.config.autonomyMode == "assist" {
-                if !self.config.whitelistedRecipients.contains(recipient) {
-                    emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: false)
+            if self.autonomyMode == "autopilot" || self.autonomyMode == "assist" {
+                if !self.whitelistedRecipients.contains(recipient) {
+                    emit TransactionValidated(userId: self.userId, recipient: recipient, amount: amount, allowed: false)
                     return false
                 }
             }
 
-            // Check daily limit
-            if self.config.dailySpent + amount > self.config.dailyLimit {
-                emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: false)
+            if self.dailySpent + amount > self.dailyLimit {
+                emit TransactionValidated(userId: self.userId, recipient: recipient, amount: amount, allowed: false)
                 return false
             }
 
-            self.config.dailySpent = self.config.dailySpent + amount
-            emit TransactionValidated(userId: self.config.userId, recipient: recipient, amount: amount, allowed: true)
+            self.dailySpent = self.dailySpent + amount
+            emit TransactionValidated(userId: self.userId, recipient: recipient, amount: amount, allowed: true)
             return true
         }
 
@@ -167,7 +169,7 @@ access(all) contract FlowMateAgent {
         ) {
             let record = TransactionRecord(
                 id: id,
-                userId: self.config.userId,
+                userId: self.userId,
                 from: from,
                 to: to,
                 amount: amount,
@@ -179,17 +181,26 @@ access(all) contract FlowMateAgent {
         }
 
         access(all) fun pauseAutomation() {
-            self.config.isAutomationPaused = true
-            emit AutomationPaused(userId: self.config.userId)
+            self.isAutomationPaused = true
+            emit AutomationPaused(userId: self.userId)
         }
 
         access(all) fun resumeAutomation() {
-            self.config.isAutomationPaused = false
-            emit AutomationResumed(userId: self.config.userId)
+            self.isAutomationPaused = false
+            emit AutomationResumed(userId: self.userId)
         }
 
+        // Returns a read-only snapshot of the current config
         access(all) fun getConfig(): UserConfig {
-            return self.config
+            return UserConfig(
+                userId: self.userId,
+                autonomyMode: self.autonomyMode,
+                dailyLimit: self.dailyLimit,
+                dailySpent: self.dailySpent,
+                lastReset: self.lastReset,
+                whitelistedRecipients: self.whitelistedRecipients,
+                isAutomationPaused: self.isAutomationPaused
+            )
         }
 
         access(all) fun getTransactionHistory(): [TransactionRecord] {
@@ -197,12 +208,12 @@ access(all) contract FlowMateAgent {
         }
     }
 
-    access(all) fun registerUser(userId: String, autonomyMode: String, dailyLimit: UFix64): @UserAccount {
+    access(all) fun registerUser(userId: String, autonomyMode: String, dailyLimit: UFix64, address: Address): @UserAccount {
         pre {
             autonomyMode == "manual" || autonomyMode == "assist" || autonomyMode == "autopilot": "Invalid autonomy mode"
             dailyLimit > 0.0: "Daily limit must be positive"
         }
-        emit UserRegistered(userId: userId, address: getCurrentBlock().timestamp as Address)
+        emit UserRegistered(userId: userId, address: address)
         return <- create UserAccount(userId: userId, autonomyMode: autonomyMode, dailyLimit: dailyLimit)
     }
 

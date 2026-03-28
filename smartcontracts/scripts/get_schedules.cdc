@@ -1,8 +1,13 @@
-import ScheduledTransactions from 0xScheduledTransactions
+import ScheduledTransactions from 0xc26f3fa2883a46db
 
-/// Script to retrieve user's scheduled transactions
-/// Read-only query - does not create a transaction
+/// Get scheduled transactions for a given address
+access(all) fun main(addr: Address): [ScheduledTransactions.Schedule] {
+    let account = getAccount(addr)
+    let managerCap = account.capabilities.borrow<&ScheduledTransactions.ScheduleManager>(/public/scheduleManager)
 
-pub fun main(addr: Address): [ScheduledTransactions.Schedule] {
-  return ScheduledTransactions.getUserSchedules(address: addr)
+    if managerCap == nil {
+        return []
+    }
+
+    return managerCap!.getAllSchedules(userId: addr.toString())
 }
