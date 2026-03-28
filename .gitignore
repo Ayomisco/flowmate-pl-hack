@@ -7,6 +7,7 @@
 
 # Redundant files
 redundants/
+docs/
 
 # Documentation
 flowmate-prd.md
@@ -26,3 +27,5 @@ Thumbs.db
 dist/
 build/
 .next/
+
+
