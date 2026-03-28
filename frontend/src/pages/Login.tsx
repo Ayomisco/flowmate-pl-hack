@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Mail, Fingerprint } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
-import flowmateIcon from "@/assets/flowmate-icon.png";
+import flowmateIcon from "@/assets/flowmate-logo.svg";
 
 const Login = () => {
   const navigate = useNavigate();

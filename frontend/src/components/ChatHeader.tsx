@@ -1,4 +1,4 @@
-import flowmateLogo from "@/assets/flowmate-logo.png";
+import flowmateLogo from "@/assets/flowmate-logo.svg";
 import { Zap } from "lucide-react";
 
 const ChatHeader = () => (

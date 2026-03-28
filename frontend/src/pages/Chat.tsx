@@ -4,7 +4,7 @@ import { Send, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
-import flowmateLogo from "@/assets/flowmate-logo.png";
+import flowmateLogo from "@/assets/flowmate-logo.svg";
 
 interface Message {
   id: string;
