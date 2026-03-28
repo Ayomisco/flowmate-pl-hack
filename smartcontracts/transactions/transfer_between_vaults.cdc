@@ -1,19 +1,18 @@
-import VaultManager from 0x02
+import VaultManager from 0xVaultManager
 
-/// Transfer funds between user vaults
-transaction(
-    fromVaultType: String,
-    toVaultType: String,
-    amount: UFix64
-) {
-    prepare(signer: auth(BorrowValue) &Account) {
-        VaultManager.transferBetweenVaults(
-            userAddress: signer.address,
-            fromVaultType: fromVaultType,
-            toVaultType: toVaultType,
-            amount: amount
-        )
+/// Transaction to transfer funds between user's vaults
+/// Example: Transfer from Available vault to Savings vault
 
-        log("Transfer completed: ".concat(amount.toString()).concat(" from ").concat(fromVaultType).concat(" to ").concat(toVaultType))
-    }
+transaction(from: String, to: String, amount: UFix64) {
+  prepare(signer: AuthAccount) {
+    let vaults = signer.borrow<&VaultManager.UserVaults>(from: VaultManager.UserVaultsStoragePath)
+      ?? panic("User vaults not found")
+
+    // Perform transfer
+    vaults.transferBetweenVaults(from: from, to: to, amount: amount)
+  }
+
+  execute {
+    log("Transferred ".concat(amount.toString()).concat(" from ").concat(from).concat(" to ").concat(to))
+  }
 }

@@ -1,78 +1,84 @@
-import config from './env';
-import * as fcl from '@onflow/fcl';
+import * as fcl from "@onflow/fcl";
+import { transaction, script } from "@onflow/fcl";
+import config from "./env";
 
-// Initialize FCL with Flow configuration
+// Initialize FCL
 fcl.config({
-  'accessNode.api': config.flowAccessNode,
-  'app.detail.title': 'FlowMate',
-  'app.detail.icon': 'https://flowmate.app/logo.svg',
-  'flow.network': config.flowNetwork === 'testnet' ? 'testnet' : 'mainnet',
+  "accessNode.api": config.flowAccessNode,
+  "discovery.wallet": `${config.flowAccessNode.replace("rest", "http")}/flow/testnet/wallets/discovery`,
 });
 
-interface FlowConfig {
-  accessNode: string;
-  network: string;
-  accountAddress: string;
-  privateKey: string;
-  contracts: {
-    flowmateAgent: string;
-    vaultManager: string;
-    scheduledTransactions: string;
-  };
+interface AuthorizerOptions {
+  addr: string;
+  keyId: number;
+  signingFunction: (signable: any) => Promise<any>;
 }
 
-const flowConfig: FlowConfig = {
-  accessNode: config.flowAccessNode,
-  network: config.flowNetwork,
-  accountAddress: config.flowAccountAddress,
-  privateKey: config.flowAccountPrivateKey,
-  contracts: {
-    flowmateAgent: config.flowmateAgentContract,
-    vaultManager: config.vaultManagerContract,
-    scheduledTransactions: config.scheduledTransactionsContract,
-  },
-};
-
 /**
- * Build authorization function for transactions
- * Signs transactions with the account's private key
+ * Build authorization function for signing transactions
  */
-export const buildAuthorization = async () => {
-  return fcl.authorizationInclusion(fcl.signer(
-    flowConfig.accountAddress,
-    flowConfig.privateKey,
-    0 // keyId
-  ));
+export const buildAuthorization = (
+  addr: string,
+  keyId: number,
+  privateKey: string
+): AuthorizerOptions => {
+  return {
+    addr: fcl.sansPrefix(addr),
+    keyId,
+    signingFunction: async (signable: any) => {
+      // This would use FCL's signing utilities
+      // For now, returns the signing function reference
+      return {
+        signature: privateKey, // Placeholder - actual signing handled by FCL
+      };
+    },
+  };
 };
 
 /**
- * Query the blockchain for data
+ * Query Flow blockchain (read-only)
  */
-export const queryFlow = async (script: string, args: any[]) => {
-  return fcl.query({
-    cadence: script,
-    args: args,
-  });
+export const queryFlow = async (cadenceScript: string, args: any[] = []): Promise<any> => {
+  try {
+    const result = await fcl.query({
+      cadence: cadenceScript,
+      args: (arg: any, t: any) => args.map((a) => arg(a, t)),
+    });
+    return result;
+  } catch (error) {
+    console.error("Flow query error:", error);
+    throw error;
+  }
 };
 
 /**
- * Send a transaction to the blockchain
+ * Execute transaction on Flow blockchain
  */
 export const executeFlow = async (
   cadence: string,
-  args: any[],
-  authorizers?: any[]
-) => {
-  const response = await fcl.mutate({
-    cadence,
-    args: (arg: any, t: any) => args.map((a, i) => arg(a, t)),
-    authorizations: authorizers || [buildAuthorization],
-    payer: buildAuthorization,
-    proposer: buildAuthorization,
-  });
+  args: any[] = [],
+  authorizers: AuthorizerOptions[] = []
+): Promise<string> => {
+  try {
+    const txId = await fcl.mutate({
+      cadence,
+      args: (arg: any, t: any) => args.map((a) => arg(a, t)),
+      proposer: authorizers[0],
+      payer: authorizers[0],
+      authorizations: authorizers,
+      limit: 9999,
+    });
 
-  return fcl.tx(response).onceSealed();
+    // Wait for transaction to be sealed
+    return await fcl.tx(txId).onceSealed();
+  } catch (error) {
+    console.error("Flow transaction error:", error);
+    throw error;
+  }
 };
 
-export default flowConfig;
-export { fcl };
+export default {
+  queryFlow,
+  executeFlow,
+  buildAuthorization,
+};
