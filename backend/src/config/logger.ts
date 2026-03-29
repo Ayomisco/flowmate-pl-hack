@@ -1,6 +1,20 @@
 import winston from 'winston';
 import { env } from './env.js';
 
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.simple()
+    ),
+  }),
+];
+
+// Only write to file in development — Vercel serverless has a read-only filesystem
+if (env.nodeEnv === 'development') {
+  transports.push(new winston.transports.File({ filename: env.logFile }));
+}
+
 const logger = winston.createLogger({
   level: env.logLevel,
   format: winston.format.combine(
@@ -10,15 +24,7 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   defaultMeta: { service: 'flowmate-backend' },
-  transports: [
-    new winston.transports.File({ filename: env.logFile }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
-    }),
-  ],
+  transports,
 });
 
 export default logger;
