@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { env as config } from "../config/env.js";
-import logger from "../config/logger";
+import logger from "../config/logger.js";
 
 export interface AuthRequest extends Request {
   userId?: string;
