@@ -2,17 +2,49 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Mail, Fingerprint } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/hooks/use-toast";
 import heroBg from "@/assets/hero-bg.jpg";
 import flowmateIcon from "@/assets/flowmate-logo.svg";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login, register } = useAuth();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showEmail, setShowEmail] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleEmailSignIn = (e: React.FormEvent) => {
+  const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email.trim()) navigate("/chat");
+    if (!email.trim() || !password.trim()) return;
+    setLoading(true);
+    try {
+      await login(email, password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || "Sign in failed";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreatePasskey = async () => {
+    if (!email.trim() || !password.trim()) {
+      setShowEmail(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      await register(email, password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || "Registration failed";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -53,7 +85,9 @@ const Login = () => {
         <div className="glass-card px-6 py-4 text-center mb-6 w-full">
           <p className="text-base font-body leading-relaxed">
             Your autonomous financial operating system. <br/>
-            <span className="text-primary font-semibold text-glow">Save automatically.</span> <span className="text-primary font-semibold text-glow">Send intelligently.</span> <span className="text-primary font-semibold text-glow">Invest autonomously.</span>
+            <span className="text-primary font-semibold text-glow">Save automatically.</span>{" "}
+            <span className="text-primary font-semibold text-glow">Send intelligently.</span>{" "}
+            <span className="text-primary font-semibold text-glow">Invest autonomously.</span>
           </p>
         </div>
 
@@ -89,19 +123,31 @@ const Login = () => {
                 className="glass-input w-full px-4 py-3 text-sm"
                 autoFocus
               />
-              <button type="submit" className="btn-primary w-full text-base">
-                Continue
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="glass-input w-full px-4 py-3 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full text-base disabled:opacity-60"
+              >
+                {loading ? "Signing in..." : "Continue"}
               </button>
             </motion.form>
           )}
 
           <motion.button
             whileTap={{ scale: 0.97 }}
-            onClick={() => navigate("/chat")}
-            className="btn-glass w-full flex items-center justify-center gap-3 text-base"
+            onClick={handleCreatePasskey}
+            disabled={loading}
+            className="btn-glass w-full flex items-center justify-center gap-3 text-base disabled:opacity-60"
           >
             <Fingerprint className="w-5 h-5" />
-            Create Passkey
+            Create Account
           </motion.button>
         </div>
 

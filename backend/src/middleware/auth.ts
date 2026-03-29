@@ -1,11 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import config from "../config/env";
+import { env as config } from "../config/env.js";
 import logger from "../config/logger";
 
 export interface AuthRequest extends Request {
   userId?: string;
-  user?: { id: string; email: string };
 }
 
 /**
@@ -28,7 +27,6 @@ export const authenticateToken = (
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as { userId: string; email: string };
     req.userId = decoded.userId;
-    req.user = { id: decoded.userId, email: decoded.email };
     next();
   } catch (err) {
     logger.warn("Invalid token", { path: req.path, error: (err as Error).message });
@@ -47,7 +45,6 @@ export const optionalAuth = (req: AuthRequest, res: Response, next: NextFunction
     try {
       const decoded = jwt.verify(token, config.jwtSecret) as { userId: string; email: string };
       req.userId = decoded.userId;
-      req.user = { id: decoded.userId, email: decoded.email };
     } catch (err) {
       logger.debug("Optional auth token validation failed", { error: (err as Error).message });
     }

@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { ChevronRight, LogOut, User } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/hooks/use-toast";
+import api from "@/lib/api";
 
 const autonomyModes = [
   { id: "manual", label: "Manual", desc: "Approve every operation" },
@@ -27,6 +31,42 @@ const fadeUp = {
 const Config = () => {
   const [mode, setMode] = useState<string>("assist");
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => {
+      const { data } = await api.get("/api/v1/users/me");
+      return data.data as { id: string; email: string; autonomyMode: string; dailyLimit: number };
+    },
+  });
+
+  useEffect(() => {
+    if (profile?.autonomyMode) setMode(profile.autonomyMode);
+  }, [profile]);
+
+  const autonomyMutation = useMutation({
+    mutationFn: (newMode: string) =>
+      api.put("/api/v1/users/me/autonomy", { mode: newMode }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast({ title: "Saved", description: "Autonomy mode updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update mode", variant: "destructive" });
+    },
+  });
+
+  const handleModeChange = (newMode: string) => {
+    setMode(newMode);
+    autonomyMutation.mutate(newMode);
+  };
+
+  const handleSignOut = () => {
+    logout();
+    navigate("/");
+  };
 
   return (
     <div className="page-shell">
@@ -40,12 +80,11 @@ const Config = () => {
               <User className="w-6 h-6 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm truncate">Amaka Obi</p>
-              <p className="text-xs text-muted-foreground truncate">amaka@email.com</p>
+              <p className="font-semibold text-sm truncate">{profile?.email?.split("@")[0] || user?.email?.split("@")[0] || "User"}</p>
+              <p className="text-xs text-muted-foreground truncate">{profile?.email || user?.email}</p>
             </div>
           </motion.div>
 
-          {/* Divider */}
           <div className="divider-subtle" />
 
           {/* Autonomy section */}
@@ -55,8 +94,9 @@ const Config = () => {
               {autonomyModes.map((m) => (
                 <button
                   key={m.id}
-                  onClick={() => setMode(m.id)}
-                  className={`py-3 rounded-xl text-xs font-medium transition-all ${
+                  onClick={() => handleModeChange(m.id)}
+                  disabled={autonomyMutation.isPending}
+                  className={`py-3 rounded-xl text-xs font-medium transition-all disabled:opacity-60 ${
                     mode === m.id
                       ? "bg-primary text-primary-foreground shadow-lg"
                       : "bg-card/50 text-muted-foreground hover:bg-card/70"
@@ -71,7 +111,6 @@ const Config = () => {
             </p>
           </motion.div>
 
-          {/* Divider */}
           <div className="divider-subtle" />
 
           {/* Settings menu */}
@@ -91,10 +130,10 @@ const Config = () => {
             </div>
           </motion.div>
 
-          {/* Sign out button */}
+          {/* Sign out */}
           <motion.div {...fadeUp} transition={{ delay: 0.15 }} className="pt-4">
             <button
-              onClick={() => navigate("/")}
+              onClick={handleSignOut}
               className="w-full px-4 py-3 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive font-medium transition-colors flex items-center justify-center gap-2"
             >
               <LogOut className="w-4 h-4" />

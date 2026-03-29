@@ -1,6 +1,6 @@
-import { getAIService } from "./ai.service";
-import logger from "../config/logger";
-import { ParsedIntent } from "../types";
+import { getAIService } from "./ai.service.js";
+import logger from "../config/logger.js";
+import { ParsedIntent } from "../types/index.js";
 
 /**
  * Rule Engine Service

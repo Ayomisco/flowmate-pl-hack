@@ -1,171 +1,96 @@
-import { executeFlow, queryFlow } from "../config/flow";
-import logger from "../config/logger";
+import * as fcl from '@onflow/fcl';
+import { queryFlow, CONTRACT_ADDRESS } from '../config/flow.js';
+import logger from '../config/logger.js';
 
-/**
- * Flow Blockchain Service
- * Handles all blockchain interactions
- */
+const ADDR = CONTRACT_ADDRESS;
+
+// ── Read Scripts ────────────────────────────────────────────────────────────
+
+const GET_VAULTS_SCRIPT = `
+import VaultManager from ${ADDR}
+
+access(all) fun main(addr: Address): {String: UFix64} {
+    let account = getAccount(addr)
+    let vaultsCap = account.capabilities.borrow<&VaultManager.UserVaults>(/public/userVaults)
+    if vaultsCap == nil { return {} }
+    let allVaults = vaultsCap!.getAllVaults()
+    var balances: {String: UFix64} = {}
+    for key in allVaults.keys {
+        if let vault = allVaults[key] { balances[key] = vault.getBalance() }
+    }
+    return balances
+}
+`;
+
+const GET_USER_CONFIG_SCRIPT = `
+import FlowMateAgent from ${ADDR}
+
+access(all) fun main(addr: Address): FlowMateAgent.UserConfig? {
+    let account = getAccount(addr)
+    let cap = account.capabilities.borrow<&FlowMateAgent.UserAccount>(/public/flowmateUserAccount)
+    if cap == nil { return nil }
+    return cap!.getConfig()
+}
+`;
+
+const GET_SCHEDULES_SCRIPT = `
+import ScheduledTransactions from ${ADDR}
+
+access(all) fun main(addr: Address): [ScheduledTransactions.Schedule] {
+    let account = getAccount(addr)
+    let cap = account.capabilities.borrow<&ScheduledTransactions.ScheduleManager>(/public/scheduleManager)
+    if cap == nil { return [] }
+    return cap!.getAllSchedules(userId: addr.toString())
+}
+`;
+
+// ── Service ─────────────────────────────────────────────────────────────────
 
 export class FlowService {
   /**
-   * Register new user on-chain
+   * Get vault balances for a user address.
+   * Returns { available, savings, emergency, staking } in UFix64 strings.
+   * Falls back to empty map on error (user may not have registered on-chain yet).
    */
-  async registerUser(userAddress: string, autonomyMode: "manual" | "assist" | "autopilot") {
+  async getUserVaults(address: string): Promise<Record<string, string>> {
     try {
-      logger.info("Registering user on Flow", { userAddress, autonomyMode });
-
-      const txId = await executeFlow(
-        `
-        import FlowMateAgent from 0xFlowMateAgent
-
-        transaction(autonomyMode: String) {
-          let authAccount: AuthAccount
-
-          prepare(signer: AuthAccount) {
-            self.authAccount = signer
-          }
-
-          execute {
-            FlowMateAgent.registerUser(
-              acct: self.authAccount,
-              initialMode: autonomyMode
-            )
-          }
-        }
-        `,
-        [autonomyMode]
-      );
-
-      return { success: true, txId };
-    } catch (error) {
-      logger.error("User registration failed", { error: (error as Error).message });
-      throw error;
+      const result = await queryFlow(GET_VAULTS_SCRIPT, (arg: any, t: any) => [
+        arg(address, t.Address),
+      ]);
+      return result as Record<string, string>;
+    } catch (err) {
+      logger.warn('getUserVaults failed (user may not be on-chain)', { address, err: (err as Error).message });
+      return { available: '0.00000000', savings: '0.00000000', emergency: '0.00000000', staking: '0.00000000' };
     }
   }
 
   /**
-   * Get user config from on-chain
+   * Get user agent config from on-chain.
    */
-  async getUserConfig(userAddress: string) {
+  async getUserConfig(address: string): Promise<Record<string, any> | null> {
     try {
-      const config = await queryFlow(
-        `
-        import FlowMateAgent from 0xFlowMateAgent
-
-        pub fun main(addr: Address): FlowMateAgent.UserConfig {
-          return FlowMateAgent.getUserConfig(address: addr) ?? panic("User not registered")
-        }
-        `,
-        [userAddress]
-      );
-
-      return config;
-    } catch (error) {
-      logger.error("Failed to fetch user config", { error: (error as Error).message });
-      throw error;
+      const result = await queryFlow(GET_USER_CONFIG_SCRIPT, (arg: any, t: any) => [
+        arg(address, t.Address),
+      ]);
+      return result as Record<string, any>;
+    } catch (err) {
+      logger.warn('getUserConfig failed', { address, err: (err as Error).message });
+      return null;
     }
   }
 
   /**
-   * Get user vaults from on-chain
+   * Get scheduled transactions for a user address.
    */
-  async getUserVaults(userAddress: string) {
+  async getSchedules(address: string): Promise<any[]> {
     try {
-      const vaults = await queryFlow(
-        `
-        import VaultManager from 0xVaultManager
-
-        pub fun main(addr: Address): {String: UFix64} {
-          return VaultManager.getUserVaultBalances(address: addr)
-        }
-        `,
-        [userAddress]
-      );
-
-      return vaults;
-    } catch (error) {
-      logger.error("Failed to fetch vaults", { error: (error as Error).message });
-      throw error;
-    }
-  }
-
-  /**
-   * Execute transfer between vaults
-   */
-  async transferBetweenVaults(
-    userAddress: string,
-    fromVault: string,
-    toVault: string,
-    amount: number
-  ) {
-    try {
-      logger.info("Executing vault transfer", { userAddress, fromVault, toVault, amount });
-
-      const txId = await executeFlow(
-        `
-        import VaultManager from 0xVaultManager
-
-        transaction(from: String, to: String, amount: UFix64) {
-          let authAccount: AuthAccount
-
-          prepare(signer: AuthAccount) {
-            self.authAccount = signer
-          }
-
-          execute {
-            VaultManager.transferBetweenVaults(
-              acct: self.authAccount,
-              fromType: from,
-              toType: to,
-              amount: amount
-            )
-          }
-        }
-        `,
-        [fromVault, toVault, amount]
-      );
-
-      return { success: true, txId };
-    } catch (error) {
-      logger.error("Vault transfer failed", { error: (error as Error).message });
-      throw error;
-    }
-  }
-
-  /**
-   * Create scheduled transaction
-   */
-  async createSchedule(userAddress: string, ruleId: string, frequency: string, nextExecution: Date) {
-    try {
-      logger.info("Creating schedule", { userAddress, ruleId, frequency });
-
-      const txId = await executeFlow(
-        `
-        import ScheduledTransactions from 0xScheduledTransactions
-
-        transaction(frequency: String, nextExecution: UFix64) {
-          let authAccount: AuthAccount
-
-          prepare(signer: AuthAccount) {
-            self.authAccount = signer
-          }
-
-          execute {
-            ScheduledTransactions.createSchedule(
-              acct: self.authAccount,
-              frequency: frequency,
-              nextExecution: nextExecution
-            )
-          }
-        }
-        `,
-        [frequency, nextExecution.getTime() / 1000]
-      );
-
-      return { success: true, txId };
-    } catch (error) {
-      logger.error("Schedule creation failed", { error: (error as Error).message });
-      throw error;
+      const result = await queryFlow(GET_SCHEDULES_SCRIPT, (arg: any, t: any) => [
+        arg(address, t.Address),
+      ]);
+      return result as any[];
+    } catch (err) {
+      logger.warn('getSchedules failed', { address, err: (err as Error).message });
+      return [];
     }
   }
 }

@@ -1,16 +1,25 @@
-import { HfInference } from "@huggingface/inference";
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenerativeAI } from "google-generative-ai";
 import { Groq } from "groq-sdk";
-import OpenAI from "openai";
 import axios from "axios";
-import config from "../config/env";
-import { ParsedIntent, AIResponse } from "../types";
-import logger from "../config/logger";
+import { env as config } from "../config/env.js";
+import { ParsedIntent, AIResponse } from "../types/index.js";
+import logger from "../config/logger.js";
 
-/**
- * Abstract AI Service for provider-agnostic integration
- */
+const INTENT_PROMPT = `You are FlowMate's AI financial agent. Parse user messages into structured financial intents.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "action": "send|receive|save|swap|stake|dca|bill|query|unknown",
+  "intent": "short description of what the user wants",
+  "parameters": { "recipient": "address or name", "amount": 100, "vault": "savings", "frequency": "weekly" },
+  "confidence": 0.95,
+  "requiresConfirmation": true
+}`;
+
+const RESPONSE_PROMPT = `You are FlowMate, a helpful autonomous financial AI assistant running on Flow blockchain.
+Respond naturally and concisely (2-3 sentences max). Be friendly and action-oriented.
+You manage: vaults (available/savings/emergency/staking), scheduled transfers, daily limits, and smart automation.`;
+
 abstract class AIService {
   abstract parseIntent(userMessage: string): Promise<ParsedIntent>;
   abstract generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string>;
@@ -19,12 +28,7 @@ abstract class AIService {
     try {
       const intent = await this.parseIntent(userMessage);
       const message = await this.generateResponse(intent, context || {});
-
-      return {
-        message,
-        intent,
-        actionRequired: intent.requiresConfirmation,
-      };
+      return { message, intent, actionRequired: intent.requiresConfirmation };
     } catch (error) {
       logger.error("AI processing error", { error: (error as Error).message });
       throw error;
@@ -32,9 +36,8 @@ abstract class AIService {
   }
 }
 
-/**
- * Claude AI Service
- */
+// ── Claude ───────────────────────────────────────────────────────────────────
+
 class ClaudeAIService extends AIService {
   private client: Anthropic;
 
@@ -44,42 +47,18 @@ class ClaudeAIService extends AIService {
   }
 
   async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const systemPrompt = `You are FlowMate's AI financial agent. Parse user messages into structured intents.
-
-Return only valid JSON with this structure:
-{
-  "action": "send|receive|save|swap|stake|dca|bill",
-  "intent": "description of what user wants",
-  "parameters": { "recipient": "address", "amount": 100, ... },
-  "confidence": 0.95,
-  "requiresConfirmation": true
-}`;
-
     const response = await this.client.messages.create({
       model: config.claudeModel,
       max_tokens: 500,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
+      system: INTENT_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
     });
-
     const content = response.content[0];
     if (content.type !== "text") throw new Error("Invalid response type");
-
     try {
       return JSON.parse(content.text);
     } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
+      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
     }
   }
 
@@ -87,131 +66,17 @@ Return only valid JSON with this structure:
     const response = await this.client.messages.create({
       model: config.claudeModel,
       max_tokens: 300,
-      system: "You are a helpful financial AI assistant. Respond naturally and concisely.",
-      messages: [
-        {
-          role: "user",
-          content: `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`,
-        },
-      ],
+      system: RESPONSE_PROMPT,
+      messages: [{ role: "user", content: `User intent: ${intent.action} — ${intent.intent}\nContext: ${JSON.stringify(context)}` }],
     });
-
     const content = response.content[0];
     if (content.type !== "text") throw new Error("Invalid response type");
     return content.text;
   }
 }
 
-/**
- * Gemini AI Service
- */
-class GeminiAIService extends AIService {
-  private client: GoogleGenerativeAI;
+// ── Groq ─────────────────────────────────────────────────────────────────────
 
-  constructor() {
-    super();
-    this.client = new GoogleGenerativeAI(config.geminiApiKey);
-  }
-
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const model = this.client.getGenerativeModel({ model: config.geminiModel });
-
-    const systemPrompt = `Parse user messages into financial intents. Return only JSON: {"action":"send|receive|save|swap|stake|dca|bill", "intent":"...", "parameters":{...}, "confidence":0.9, "requiresConfirmation":true}`;
-
-    const result = await model.generateContent(`${systemPrompt}\n\nMessage: ${userMessage}`);
-    const text = result.response.text();
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
-    }
-  }
-
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const model = this.client.getGenerativeModel({ model: config.geminiModel });
-
-    const result = await model.generateContent(
-      `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`
-    );
-
-    return result.response.text();
-  }
-}
-
-/**
- * OpenAI Service
- */
-class OpenAIService extends AIService {
-  private client: OpenAI;
-
-  constructor() {
-    super();
-    this.client = new OpenAI({ apiKey: config.openaiApiKey });
-  }
-
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const response = await this.client.chat.completions.create({
-      model: config.openaiModel,
-      max_tokens: 500,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content: `Parse user messages into financial intents. Return only JSON: {"action":"send|receive|save|swap|stake|dca|bill", "intent":"...", "parameters":{...}, "confidence":0.9, "requiresConfirmation":true}`,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
-    });
-
-    const text = response.choices[0].message.content || "";
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
-    }
-  }
-
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const response = await this.client.chat.completions.create({
-      model: config.openaiModel,
-      max_tokens: 300,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful financial AI assistant. Respond naturally and concisely.",
-        },
-        {
-          role: "user",
-          content: `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`,
-        },
-      ],
-    });
-
-    return response.choices[0].message.content || "";
-  }
-}
-
-/**
- * Groq Service
- */
 class GroqService extends AIService {
   private client: Groq;
 
@@ -224,153 +89,83 @@ class GroqService extends AIService {
     const response = await this.client.chat.completions.create({
       model: config.groqModel,
       max_tokens: 500,
-      temperature: 0.7,
+      temperature: 0.2,
       messages: [
-        {
-          role: "system",
-          content: `Parse user messages into financial intents. Return only JSON: {"action":"send|receive|save|swap|stake|dca|bill", "intent":"...", "parameters":{...}, "confidence":0.9, "requiresConfirmation":true}`,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
+        { role: "system", content: INTENT_PROMPT },
+        { role: "user", content: userMessage },
       ],
     });
-
     const text = response.choices[0].message.content || "";
-
+    // Extract JSON even if model adds surrounding text
+    const match = text.match(/\{[\s\S]*\}/);
     try {
-      return JSON.parse(text);
+      return JSON.parse(match ? match[0] : text);
     } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
+      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
     }
   }
 
   async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
+    const vaultSummary = context.vaults
+      ? Object.entries(context.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(", ")
+      : "no vault data";
     const response = await this.client.chat.completions.create({
       model: config.groqModel,
       max_tokens: 300,
       temperature: 0.7,
       messages: [
-        {
-          role: "system",
-          content: "You are a helpful financial AI assistant. Respond naturally and concisely.",
-        },
+        { role: "system", content: RESPONSE_PROMPT },
         {
           role: "user",
-          content: `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`,
+          content: `User said: "${intent.intent}"\nAction: ${intent.action}\nVaults: ${vaultSummary}\nAutonomy: ${context.autonomyMode || "manual"}`,
         },
       ],
     });
-
-    return response.choices[0].message.content || "";
+    return response.choices[0].message.content || "I'm on it. Let me process that for you.";
   }
 }
 
-/**
- * Ollama Service (Local)
- */
+// ── Ollama (local) ────────────────────────────────────────────────────────────
+
 class OllamaService extends AIService {
   async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const systemPrompt = `Parse user messages into financial intents. Return only JSON: {"action":"send|receive|save|swap|stake|dca|bill", "intent":"...", "parameters":{...}, "confidence":0.9, "requiresConfirmation":true}`;
-
     const response = await axios.post(`${config.ollamaUrl}/api/generate`, {
       model: config.ollamaModel,
-      prompt: `${systemPrompt}\n\nMessage: ${userMessage}`,
+      prompt: `${INTENT_PROMPT}\n\nMessage: ${userMessage}`,
       stream: false,
     });
-
-    const text = response.data.response || "";
-
     try {
-      return JSON.parse(text);
+      return JSON.parse(response.data.response || "{}");
     } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
+      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
     }
   }
 
   async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
     const response = await axios.post(`${config.ollamaUrl}/api/generate`, {
       model: config.ollamaModel,
-      prompt: `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`,
+      prompt: `${RESPONSE_PROMPT}\n\nIntent: ${intent.action}\nContext: ${JSON.stringify(context)}`,
       stream: false,
     });
-
     return response.data.response || "Unable to generate response";
   }
 }
 
-/**
- * Llama Service (Alternative local)
- */
-class LlamaService extends AIService {
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const systemPrompt = `Parse user messages into financial intents. Return only JSON: {"action":"send|receive|save|swap|stake|dca|bill", "intent":"...", "parameters":{...}, "confidence":0.9, "requiresConfirmation":true}`;
+// ── Factory ───────────────────────────────────────────────────────────────────
 
-    const response = await axios.post(`${config.llamaUrl}/completion`, {
-      prompt: `${systemPrompt}\n\nMessage: ${userMessage}`,
-      temperature: 0.7,
-      max_tokens: 500,
-    });
-
-    const text = response.data.content || "";
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return {
-        action: "unknown",
-        intent: userMessage,
-        parameters: {},
-        confidence: 0.5,
-        requiresConfirmation: true,
-      };
-    }
-  }
-
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const response = await axios.post(`${config.llamaUrl}/completion`, {
-      prompt: `Intent: ${intent.action}\nContext: ${JSON.stringify(context)}\n\nRespond naturally about this financial action.`,
-      temperature: 0.7,
-      max_tokens: 300,
-    });
-
-    return response.data.content || "Unable to generate response";
-  }
-}
-
-/**
- * Factory function to get appropriate AI service
- */
 export const getAIService = (): AIService => {
   switch (config.aiProvider) {
     case "claude":
       return new ClaudeAIService();
-    case "gemini":
-      return new GeminiAIService();
-    case "openai":
-      return new OpenAIService();
     case "groq":
       return new GroqService();
     case "ollama":
-      return new OllamaService();
     case "llama":
-      return new LlamaService();
+      return new OllamaService();
     default:
-      throw new Error(`Unknown AI provider: ${config.aiProvider}`);
+      // Default to Groq since it's configured
+      return new GroqService();
   }
 };
 
-export { AIService, ClaudeAIService, GeminiAIService, OpenAIService, GroqService, OllamaService, LlamaService };
+export { AIService, ClaudeAIService, GroqService, OllamaService };
