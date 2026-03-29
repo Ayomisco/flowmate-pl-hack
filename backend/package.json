@@ -28,6 +28,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
+    "@magic-sdk/admin": "^2.8.2",
     "@onflow/fcl": "^1.4.0",
     "@onflow/types": "^1.4.0",
     "@prisma/client": "^5.8.0",

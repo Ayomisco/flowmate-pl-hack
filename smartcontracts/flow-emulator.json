@@ -1,0 +1,25 @@
+{
+  "networks": {
+    "emulator": {
+      "host": "127.0.0.1:3569"
+    },
+    "testnet": {
+      "host": "https://rest-testnet.onflow.org"
+    }
+  },
+  "accounts": {
+    "emulator-account": {
+      "address": "f8d6e0586b0a20c7",
+      "key": "2eab2718734a41f56ef2ff34ca2955026093abc31e99984db394170a17ea839b"
+    }
+  },
+  "deployments": {
+    "emulator": {
+      "emulator-account": [
+        "FlowMateAgent",
+        "VaultManager",
+        "ScheduledTransactions"
+      ]
+    }
+  }
+}

@@ -11,6 +11,8 @@ import userRoutes from './routes/user.routes.js';
 import vaultRoutes from './routes/vault.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import transactionRoutes from './routes/transaction.routes.js';
+import rulesRoutes from './routes/rules.routes.js';
+import goalsRoutes from './routes/goals.routes.js';
 
 const app = express();
 
@@ -38,6 +40,8 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/vaults', vaultRoutes);
 app.use('/api/v1/chat', chatRoutes);
 app.use('/api/v1/transactions', transactionRoutes);
+app.use('/api/v1/rules', rulesRoutes);
+app.use('/api/v1/goals', goalsRoutes);
 
 // 404
 app.use((req: Request, res: Response) => {

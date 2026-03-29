@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, Send, ArrowDownUp, PiggyBank, ExternalLink } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, Send, ArrowDownUp, PiggyBank, ExternalLink, Zap, ChevronRight } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
 import SendModal from "@/components/SendModal";
@@ -52,10 +52,16 @@ const Dashboard = () => {
     queryFn: async () => { const { data } = await api.get("/api/v1/transactions?limit=5"); return data.data.transactions; },
   });
 
+  const { data: rulesData } = useQuery({
+    queryKey: ["rules"],
+    queryFn: async () => { const { data } = await api.get("/api/v1/rules"); return data.data as {id: string; type: string; status: string; config: any; nextExecution?: string}[]; },
+  });
+
   const vaults = vaultData || [];
   const transactions = txData || [];
   const totalBalance = vaults.reduce((sum, v) => sum + (v.balance || 0), 0);
   const availableBalance = vaults.find(v => v.type === "available")?.balance || 0;
+  const activeRules = (rulesData || []).filter(r => r.status === "active");
 
   return (
     <div className="page-shell">
@@ -88,6 +94,24 @@ const Dashboard = () => {
           </motion.div>
 
           <div className="divider-subtle my-2" />
+
+          {/* Active Automations */}
+          {activeRules.length > 0 && (
+            <motion.button {...fadeUp} transition={{ delay: 0.08 }}
+              onClick={() => navigate("/rules")}
+              className="card-secondary flex items-center justify-between w-full text-left">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">{activeRules.length} active automation{activeRules.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Next: {activeRules[0]?.nextExecution ? new Date(activeRules[0].nextExecution).toLocaleDateString() : 'scheduled'}
+                </span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </div>
+            </motion.button>
+          )}
 
           {/* Vault Summary */}
           <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="card-secondary space-y-3">

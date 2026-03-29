@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { getMagic } from '@/lib/magic';
 import api from '@/lib/api';
 
 interface AuthUser {
@@ -11,9 +12,8 @@ interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  loginWithEmail: (email: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -30,28 +30,45 @@ function loadUser(): AuthUser | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(loadUser);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const { data } = await api.post('/api/v1/auth/login', { email, password });
+  /**
+   * Passwordless Magic login:
+   * 1. Magic sends OTP to user's email
+   * 2. User enters OTP in Magic's UI overlay
+   * 3. Magic returns a DID token
+   * 4. We send the DID token to our backend, which verifies it and returns a JWT
+   */
+  const loginWithEmail = useCallback(async (email: string) => {
+    const magic = getMagic();
+
+    // Triggers Magic's built-in email OTP UI — resolves after user completes it
+    const didToken = await magic.auth.loginWithEmailOTP({ email });
+
+    if (!didToken) throw new Error('Magic login failed — no DID token returned');
+
+    // Exchange DID token for our app JWT
+    const { data } = await api.post('/api/v1/auth/login', {}, {
+      headers: { Authorization: `Bearer ${didToken}` },
+    });
+
     localStorage.setItem('flowmate_token', data.data.token);
     localStorage.setItem('flowmate_user', JSON.stringify(data.data.user));
     setUser(data.data.user);
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
-    const { data } = await api.post('/api/v1/auth/register', { email, password });
-    localStorage.setItem('flowmate_token', data.data.token);
-    localStorage.setItem('flowmate_user', JSON.stringify(data.data.user));
-    setUser(data.data.user);
-  }, []);
-
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      const magic = getMagic();
+      await magic.user.logout();
+    } catch {
+      // Ignore Magic logout errors — we still clear local state
+    }
     localStorage.removeItem('flowmate_token');
     localStorage.removeItem('flowmate_user');
     setUser(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loginWithEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );
