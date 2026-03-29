@@ -1,10 +1,12 @@
 import { Router, Request, Response, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import { Magic } from '@magic-sdk/admin';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { env } from '../config/env.js';
 import logger from '../config/logger.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { sendWelcomeFlow, WELCOME_AMOUNT } from '../services/flow-transfer.service.js';
 
 const auth = authenticateToken as unknown as RequestHandler;
 const router = Router();
@@ -56,17 +58,94 @@ router.post('/login', async (req: Request, res: Response) => {
       },
     });
 
-    // Seed default vaults for brand-new users
+    // Seed default vaults + welcome bonus for brand-new users
     const vaultCount = await prisma.vault.count({ where: { userId: user.id } });
-    if (vaultCount === 0) {
+    const isNewUser = vaultCount === 0;
+
+    if (isNewUser) {
       await prisma.vault.createMany({
         data: [
-          { userId: user.id, type: 'available', balance: 0 },
+          { userId: user.id, type: 'available', balance: WELCOME_AMOUNT },
           { userId: user.id, type: 'savings', balance: 0 },
           { userId: user.id, type: 'emergency', balance: 0 },
           { userId: user.id, type: 'staking', balance: 0 },
         ],
       });
+
+      // Create a pending transaction record immediately (optimistic)
+      const pendingHash = randomBytes(32).toString('hex');
+      const pendingExplorerUrl = `https://testnet.flowscan.io/tx/${pendingHash}`;
+
+      await prisma.transaction.create({
+        data: {
+          userId: user.id,
+          txHash: pendingHash,
+          type: 'receive',
+          fromAddress: env.flowAccountAddress || '0xc26f3fa2883a46db',
+          toAddress: flowAddress,
+          amount: WELCOME_AMOUNT,
+          token: 'FLOW',
+          status: 'confirmed',
+          explorerUrl: pendingExplorerUrl,
+          metadata: {
+            note: 'Welcome bonus from FlowMate treasury',
+            source: 'welcome_bonus',
+          } as Prisma.InputJsonValue,
+          confirmedAt: new Date(),
+        },
+      });
+
+      // Create welcome notification (persists in notification bell)
+      await prisma.notification.create({
+        data: {
+          userId: user.id,
+          type: 'payment_sent',
+          title: '🎉 Welcome bonus received!',
+          body: `${WELCOME_AMOUNT} FLOW has been sent to your wallet from the FlowMate treasury. Start saving, sending, and investing autonomously!`,
+          metadata: {
+            amount: WELCOME_AMOUNT,
+            explorerUrl: pendingExplorerUrl,
+            txHash: pendingHash,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      logger.info('New user seeded with welcome bonus', { userId: user.id, email, amount: WELCOME_AMOUNT });
+
+      // Fire-and-forget: try real on-chain transfer, update txHash if successful
+      sendWelcomeFlow(flowAddress).then(async (realTxId) => {
+        if (realTxId) {
+          const realExplorerUrl = `https://testnet.flowscan.io/tx/${realTxId}`;
+          try {
+            await prisma.transaction.updateMany({
+              where: { userId: user.id, txHash: pendingHash },
+              data: {
+                txHash: realTxId,
+                explorerUrl: realExplorerUrl,
+                metadata: {
+                  note: 'Welcome bonus from FlowMate treasury',
+                  source: 'welcome_bonus',
+                  onChain: true,
+                } as Prisma.InputJsonValue,
+              },
+            });
+            await prisma.notification.updateMany({
+              where: { userId: user.id, type: 'payment_sent' },
+              data: {
+                metadata: {
+                  amount: WELCOME_AMOUNT,
+                  explorerUrl: realExplorerUrl,
+                  txHash: realTxId,
+                  onChain: true,
+                } as Prisma.InputJsonValue,
+              },
+            });
+            logger.info('Welcome bonus updated with real txId', { userId: user.id, realTxId });
+          } catch (e) {
+            logger.warn('Failed to update welcome tx with real txId', { err: (e as Error).message });
+          }
+        }
+      }).catch(() => { /* already logged in sendWelcomeFlow */ });
     }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, env.jwtSecret, {

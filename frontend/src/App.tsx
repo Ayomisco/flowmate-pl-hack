@@ -12,6 +12,7 @@ import Profile from "./pages/Profile.tsx";
 import Transactions from "./pages/Transactions.tsx";
 import Rules from "./pages/Rules.tsx";
 import Goals from "./pages/Goals.tsx";
+import Notifications from "./pages/Notifications.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/goals" element={<Goals />} />
+            <Route path="/notifications" element={<Notifications />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

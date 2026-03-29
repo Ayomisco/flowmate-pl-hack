@@ -13,6 +13,7 @@ import chatRoutes from './routes/chat.routes.js';
 import transactionRoutes from './routes/transaction.routes.js';
 import rulesRoutes from './routes/rules.routes.js';
 import goalsRoutes from './routes/goals.routes.js';
+import notificationsRoutes from './routes/notifications.routes.js';
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use('/api/v1/chat', chatRoutes);
 app.use('/api/v1/transactions', transactionRoutes);
 app.use('/api/v1/rules', rulesRoutes);
 app.use('/api/v1/goals', goalsRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
 
 // 404
 app.use((req: Request, res: Response) => {
