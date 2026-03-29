@@ -8,6 +8,35 @@ const router = Router();
 const prisma = new PrismaClient();
 const auth = authenticateToken as unknown as RequestHandler;
 
+function buildExecutionPayload(intent: any): { endpoint: string; body: Record<string, any> } | null {
+  const { action, parameters } = intent;
+  if (!parameters) return null;
+  switch (action) {
+    case 'send':
+      if (parameters.recipient && parameters.amount) {
+        return { endpoint: '/api/v1/transactions/send', body: { recipient: parameters.recipient, amount: parameters.amount, note: parameters.note } };
+      }
+      return null;
+    case 'save':
+      if (parameters.amount) {
+        return { endpoint: '/api/v1/transactions/save', body: { amount: parameters.amount, toVault: parameters.vault || 'savings' } };
+      }
+      return null;
+    case 'swap':
+      if (parameters.fromVault && parameters.toVault && parameters.amount) {
+        return { endpoint: '/api/v1/transactions/swap', body: { fromVault: parameters.fromVault, toVault: parameters.toVault, amount: parameters.amount } };
+      }
+      return null;
+    case 'stake':
+      if (parameters.amount) {
+        return { endpoint: '/api/v1/transactions/stake', body: { amount: parameters.amount } };
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
 // POST /api/v1/chat
 router.post('/', auth, async (req: AuthRequest, res: Response) => {
   const { message } = req.body;
@@ -15,36 +44,27 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
     res.status(400).json({ success: false, error: 'Message required' });
     return;
   }
-
   try {
     const [user, vaults] = await Promise.all([
       prisma.user.findUnique({
         where: { id: req.userId },
-        select: { autonomyMode: true, dailyLimit: true, dailySpent: true },
+        select: { autonomyMode: true, dailyLimit: true, dailySpent: true, flowAddress: true },
       }),
       prisma.vault.findMany({ where: { userId: req.userId } }),
     ]);
-
     const context = {
-      autonomyMode: user?.autonomyMode,
+      autonomyMode: user?.autonomyMode || 'manual',
       dailyLimit: user?.dailyLimit,
       dailySpent: user?.dailySpent,
-      vaults: vaults.reduce((acc, v) => ({ ...acc, [v.type]: v.balance }), {}),
+      flowAddress: user?.flowAddress,
+      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: v.balance }), {}),
     };
-
     await prisma.chatMessage.create({
-      data: {
-        userId: req.userId!,
-        role: 'user',
-        content: message,
-        confidenceScore: null,
-        parsedIntent: Prisma.JsonNull,
-      },
+      data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
     });
-
     const aiService = getAIService();
     const aiResponse = await aiService.process(message, context);
-
+    const executionPayload = buildExecutionPayload(aiResponse.intent);
     const agentMsg = await prisma.chatMessage.create({
       data: {
         userId: req.userId!,
@@ -54,13 +74,13 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
         confidenceScore: aiResponse.intent?.confidence ?? null,
       },
     });
-
     res.json({
       success: true,
       data: {
         reply: aiResponse.message,
         intent: aiResponse.intent,
         actionRequired: aiResponse.actionRequired,
+        executionPayload,
         messageId: agentMsg.id,
       },
     });
@@ -78,14 +98,7 @@ router.get('/history', auth, async (req: AuthRequest, res: Response) => {
       where: { userId: req.userId },
       orderBy: { createdAt: 'asc' },
       take: limit,
-      select: {
-        id: true,
-        role: true,
-        content: true,
-        parsedIntent: true,
-        confidenceScore: true,
-        createdAt: true,
-      },
+      select: { id: true, role: true, content: true, parsedIntent: true, confidenceScore: true, createdAt: true },
     });
     res.json({ success: true, data: messages });
   } catch (err) {

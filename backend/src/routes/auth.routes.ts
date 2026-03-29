@@ -2,6 +2,7 @@ import { Router, Request, Response, RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { env } from '../config/env.js';
 import logger from '../config/logger.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -27,9 +28,9 @@ router.post('/register', async (req: Request, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    // Generate a placeholder Flow address for demo — real apps would create a wallet
-    const flowAddress = `0x${Math.random().toString(16).slice(2, 18).padEnd(16, '0')}`;
-    const magicUserId = `magic_${Date.now()}`;
+    // Generate a unique Flow address and user ID using cryptographically secure random bytes
+    const flowAddress = `0x${randomBytes(8).toString('hex')}`;
+    const magicUserId = `user_${randomBytes(4).toString('hex')}`;
 
     const user = await prisma.user.create({
       data: {

@@ -1,18 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import {
-  ArrowUpRight,
-  ArrowDownLeft,
-  Send,
-  ArrowDownUp,
-  ChevronRight,
-} from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, Send, ArrowDownUp, PiggyBank, ExternalLink } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
 import SendModal from "@/components/SendModal";
 import ReceiveModal from "@/components/ReceiveModal";
+import SaveModal from "@/components/SaveModal";
+import SwapModal from "@/components/SwapModal";
 import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 
 const fadeUp = {
@@ -21,88 +18,73 @@ const fadeUp = {
   transition: { duration: 0.4 },
 };
 
-interface Vault {
-  type: string;
-  balance: number;
-}
-
+interface Vault { type: string; balance: number; }
 interface Transaction {
-  id: string;
-  type: string;
-  amount: number;
-  status: string;
-  createdAt: string;
-  recipient?: string;
-  description?: string;
+  id: string; type: string; amount: number; status: string;
+  createdAt: string; toAddress?: string; fromAddress?: string;
+  explorerUrl?: string; description?: string;
 }
 
-const txIcon = (type: string) => {
-  if (type === "receive") return <ArrowDownLeft className="w-4 h-4" />;
-  if (type === "save") return <ArrowDownUp className="w-4 h-4" />;
-  return <ArrowUpRight className="w-4 h-4" />;
+const TX_ICON: Record<string, any> = {
+  receive: <ArrowDownLeft className="w-4 h-4" />,
+  save: <PiggyBank className="w-4 h-4" />,
+  swap: <ArrowDownUp className="w-4 h-4" />,
+  stake: <ArrowDownUp className="w-4 h-4" />,
 };
 
-const vaultLabel: Record<string, string> = {
-  available: "Available",
-  savings: "Savings",
-  emergency: "Emergency",
-  staking: "Staking",
-};
+const VAULT_LABELS: Record<string, string> = { available: "Available", savings: "Savings", emergency: "Emergency", staking: "Staking" };
 
 const Dashboard = () => {
-  const [showSendModal, setShowSendModal] = useState(false);
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [showSend, setShowSend] = useState(false);
+  const [showReceive, setShowReceive] = useState(false);
+  const [showSave, setShowSave] = useState(false);
+  const [showSwap, setShowSwap] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const { data: vaultData, isLoading: vaultsLoading } = useQuery<Vault[]>({
     queryKey: ["vaults"],
-    queryFn: async () => {
-      const { data } = await api.get("/api/v1/vaults");
-      return data.data;
-    },
+    queryFn: async () => { const { data } = await api.get("/api/v1/vaults"); return data.data; },
   });
 
   const { data: txData, isLoading: txLoading } = useQuery<Transaction[]>({
     queryKey: ["transactions"],
-    queryFn: async () => {
-      const { data } = await api.get("/api/v1/transactions");
-      return data.data.transactions;
-    },
+    queryFn: async () => { const { data } = await api.get("/api/v1/transactions?limit=5"); return data.data.transactions; },
   });
 
   const vaults = vaultData || [];
   const transactions = txData || [];
   const totalBalance = vaults.reduce((sum, v) => sum + (v.balance || 0), 0);
+  const availableBalance = vaults.find(v => v.type === "available")?.balance || 0;
 
   return (
     <div className="page-shell">
       <div className="flex-1 app-container">
         <ChatHeader />
-
         <div className="px-4 pt-6 pb-28 space-y-4 overflow-y-auto">
+
           {/* Balance Card */}
           <motion.div {...fadeUp} className="card-primary text-center space-y-2">
             <p className="text-label">Total Wealth</p>
-            {vaultsLoading ? (
-              <div className="h-10 bg-muted/30 rounded-lg animate-pulse mx-auto w-32" />
-            ) : (
-              <h1 className="text-balance">
-                {totalBalance.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
-              </h1>
+            {vaultsLoading ? <div className="h-10 bg-muted/30 rounded-lg animate-pulse mx-auto w-40" /> : (
+              <h1 className="text-balance">{totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-2xl">FLOW</span></h1>
             )}
-            <p className="text-xs text-primary/80 font-medium">Flow Blockchain</p>
+            <p className="text-xs text-primary/80 font-medium truncate">{user?.flowAddress || "Flow Testnet"}</p>
           </motion.div>
 
-          {/* Primary Actions */}
-          <motion.div {...fadeUp} transition={{ delay: 0.05 }} className="grid grid-cols-2 gap-3">
-            <button onClick={() => setShowSendModal(true)} className="card-action flex flex-col items-center justify-center gap-2 py-6">
-              <Send className="w-6 h-6 text-primary" />
-              <span className="text-sm font-medium">Send</span>
-            </button>
-            <button onClick={() => setShowReceiveModal(true)} className="card-action flex flex-col items-center justify-center gap-2 py-6">
-              <ArrowDownLeft className="w-6 h-6 text-primary" />
-              <span className="text-sm font-medium">Receive</span>
-            </button>
+          {/* Action Grid */}
+          <motion.div {...fadeUp} transition={{ delay: 0.05 }} className="grid grid-cols-4 gap-2">
+            {[
+              { label: "Send", icon: <Send className="w-5 h-5 text-primary" />, onClick: () => setShowSend(true) },
+              { label: "Receive", icon: <ArrowDownLeft className="w-5 h-5 text-primary" />, onClick: () => setShowReceive(true) },
+              { label: "Save", icon: <PiggyBank className="w-5 h-5 text-primary" />, onClick: () => setShowSave(true) },
+              { label: "Swap", icon: <ArrowDownUp className="w-5 h-5 text-primary" />, onClick: () => setShowSwap(true) },
+            ].map(({ label, icon, onClick }) => (
+              <button key={label} onClick={onClick} className="card-action flex flex-col items-center justify-center gap-1 py-4">
+                {icon}
+                <span className="text-xs font-medium">{label}</span>
+              </button>
+            ))}
           </motion.div>
 
           <div className="divider-subtle my-2" />
@@ -111,82 +93,65 @@ const Dashboard = () => {
           <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="card-secondary space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-label">Wealth Vaults</p>
-              <p className="text-sm font-semibold text-primary">
-                {totalBalance.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
-              </p>
+              <p className="text-sm font-semibold text-primary">{totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} FLOW</p>
             </div>
             {vaultsLoading ? (
-              <div className="flex flex-wrap gap-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="flex-1 min-w-[45%] h-12 bg-muted/30 rounded-lg animate-pulse" />
-                ))}
-              </div>
+              <div className="flex flex-wrap gap-2">{[1,2,3,4].map(i => <div key={i} className="flex-1 min-w-[45%] h-12 bg-muted/30 rounded-lg animate-pulse" />)}</div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {vaults.length > 0 ? vaults.map((v) => (
+                {vaults.length > 0 ? vaults.map(v => (
                   <div key={v.type} className="flex-1 min-w-[45%] bg-muted/30 rounded-lg p-2 text-center">
-                    <p className="text-[10px] text-muted-foreground font-medium">
-                      {vaultLabel[v.type] || v.type}
-                    </p>
-                    <p className="text-xs font-semibold text-foreground">
-                      ${(v.balance / 1000).toFixed(1)}k
-                    </p>
+                    <p className="text-[10px] text-muted-foreground font-medium">{VAULT_LABELS[v.type] || v.type}</p>
+                    <p className="text-xs font-semibold text-foreground">{v.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} FLOW</p>
                   </div>
-                )) : (
-                  <p className="text-xs text-muted-foreground">No vaults found</p>
-                )}
+                )) : <p className="text-xs text-muted-foreground">No vaults. Add funds to get started.</p>}
               </div>
             )}
-            <button className="w-full flex items-center justify-center gap-1 py-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-              View All Vaults <ChevronRight className="w-4 h-4" />
-            </button>
           </motion.div>
 
           {/* Recent Activity */}
           <motion.div {...fadeUp} transition={{ delay: 0.15 }} className="card-secondary space-y-3">
-            <p className="text-label">Recent Activity</p>
+            <div className="flex items-center justify-between">
+              <p className="text-label">Recent Activity</p>
+              <button onClick={() => navigate("/transactions")} className="text-xs text-primary hover:underline">View All</button>
+            </div>
             {txLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-12 bg-muted/30 rounded-lg animate-pulse" />
-                ))}
-              </div>
+              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-12 bg-muted/30 rounded-lg animate-pulse" />)}</div>
             ) : transactions.length > 0 ? (
               <div className="space-y-2">
-                {transactions.slice(0, 5).map((tx) => (
+                {transactions.map(tx => (
                   <div key={tx.id} className="flex items-center gap-3 py-2">
                     <div className={`p-2 rounded-lg ${tx.type === "receive" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                      {txIcon(tx.type)}
+                      {TX_ICON[tx.type] || <ArrowUpRight className="w-4 h-4" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate capitalize">
-                        {tx.description || tx.type}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(tx.createdAt).toLocaleDateString()}
-                      </p>
+                      <p className="text-sm font-medium truncate capitalize">{tx.type}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(tx.createdAt).toLocaleDateString()}</p>
                     </div>
-                    <span className={`text-sm font-semibold whitespace-nowrap ${tx.amount > 0 ? "text-primary" : "text-foreground"}`}>
-                      {tx.amount > 0 ? "+" : ""}${Math.abs(tx.amount).toLocaleString()}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-sm font-semibold whitespace-nowrap ${tx.type === "receive" ? "text-primary" : "text-foreground"}`}>
+                        {tx.type === "receive" ? "+" : "-"}{Math.abs(tx.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })} FLOW
+                      </span>
+                      {tx.explorerUrl && (
+                        <a href={tx.explorerUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary">
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground py-2">No transactions yet</p>
+              <p className="text-xs text-muted-foreground py-2">No transactions yet. Try sending or saving some FLOW.</p>
             )}
-            <button className="w-full flex items-center justify-center gap-1 py-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-              View All Activity <ChevronRight className="w-4 h-4" />
-            </button>
           </motion.div>
+
         </div>
 
-        <SendModal isOpen={showSendModal} onClose={() => setShowSendModal(false)} />
-        <ReceiveModal
-          isOpen={showReceiveModal}
-          onClose={() => setShowReceiveModal(false)}
-          userWalletAddress={user?.flowAddress || "0x..."}
-        />
+        <SendModal isOpen={showSend} onClose={() => setShowSend(false)} availableBalance={availableBalance} />
+        <ReceiveModal isOpen={showReceive} onClose={() => setShowReceive(false)} userWalletAddress={user?.flowAddress || ""} />
+        <SaveModal isOpen={showSave} onClose={() => setShowSave(false)} availableBalance={availableBalance} />
+        <SwapModal isOpen={showSwap} onClose={() => setShowSwap(false)} vaults={vaults} />
 
         <BottomNav />
       </div>

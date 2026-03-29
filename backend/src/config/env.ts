@@ -59,11 +59,6 @@ export const validateEnv = () => {
   const required = [
     'databaseUrl',
     'jwtSecret',
-    'flowAccountAddress',
-    'flowAccountPrivateKey',
-    'magicApiKey',
-    'magicSecretKey',
-    'aiProvider',
   ];
 
   for (const key of required) {
