@@ -50,9 +50,4 @@ app.use((req: Request, res: Response) => {
 
 app.use(errorHandler);
 
-const PORT = env.port;
-app.listen(PORT, () => {
-  logger.info(`FlowMate API running on port ${PORT} in ${env.nodeEnv} mode`);
-});
-
 export default app;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, Send, ArrowDownUp, PiggyBank, ExternalLink, Zap, ChevronRight } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, Send, ArrowDownUp, PiggyBank, ExternalLink, Zap, ChevronRight, Target } from "lucide-react";
 import ChatHeader from "@/components/ChatHeader";
 import BottomNav from "@/components/BottomNav";
 import SendModal from "@/components/SendModal";
@@ -19,6 +19,7 @@ const fadeUp = {
 };
 
 interface Vault { type: string; balance: number; }
+interface Goal { id: string; name: string; targetAmount: number; currentAmount: number; status: string; }
 interface Transaction {
   id: string; type: string; amount: number; status: string;
   createdAt: string; toAddress?: string; fromAddress?: string;
@@ -57,11 +58,17 @@ const Dashboard = () => {
     queryFn: async () => { const { data } = await api.get("/api/v1/rules"); return data.data as {id: string; type: string; status: string; config: any; nextExecution?: string}[]; },
   });
 
+  const { data: goalsData } = useQuery({
+    queryKey: ["goals"],
+    queryFn: async () => { const { data } = await api.get("/api/v1/goals"); return data.data as Goal[]; },
+  });
+
   const vaults = vaultData || [];
   const transactions = txData || [];
   const totalBalance = vaults.reduce((sum, v) => sum + (v.balance || 0), 0);
   const availableBalance = vaults.find(v => v.type === "available")?.balance || 0;
   const activeRules = (rulesData || []).filter(r => r.status === "active");
+  const activeGoals = (goalsData || []).filter(g => g.status === "active");
 
   return (
     <div className="page-shell">
@@ -110,6 +117,35 @@ const Dashboard = () => {
                 </span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
               </div>
+            </motion.button>
+          )}
+
+          {/* Goals Preview */}
+          {activeGoals.length > 0 && (
+            <motion.button {...fadeUp} transition={{ delay: 0.09 }}
+              onClick={() => navigate("/goals")}
+              className="card-secondary w-full text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium">{activeGoals.length} active goal{activeGoals.length !== 1 ? 's' : ''}</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </div>
+              {activeGoals.slice(0, 1).map(g => {
+                const pct = Math.min(100, (g.currentAmount / g.targetAmount) * 100);
+                return (
+                  <div key={g.id} className="space-y-1">
+                    <p className="text-xs text-muted-foreground truncate">{g.name}</p>
+                    <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {g.currentAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} / {g.targetAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} FLOW · {pct.toFixed(0)}%
+                    </p>
+                  </div>
+                );
+              })}
             </motion.button>
           )}
 

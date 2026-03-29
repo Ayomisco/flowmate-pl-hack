@@ -1,7 +1,8 @@
 import { Router, Response, RequestHandler } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { getAIService } from '../services/ai.service.js';
+import { getAIService, GroqService } from '../services/ai.service.js';
+import { cacheGet, cacheSet, cacheDel } from '../config/redis.js';
 import logger from '../config/logger.js';
 import { randomBytes } from 'crypto';
 
@@ -263,6 +264,7 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
         confidenceScore: aiResponse.intent?.confidence ?? null,
       },
     });
+    await cacheDel(`chat:history:${req.userId}`);
     res.json({
       success: true,
       data: {
@@ -280,9 +282,15 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/v1/chat/history
+// GET /api/v1/chat/history — Redis-cached
 router.get('/history', auth, async (req: AuthRequest, res: Response) => {
   try {
+    const cacheKey = `chat:history:${req.userId}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      res.json({ success: true, data: JSON.parse(cached) });
+      return;
+    }
     const limit = parseInt(req.query.limit as string) || 50;
     const messages = await prisma.chatMessage.findMany({
       where: { userId: req.userId },
@@ -290,9 +298,127 @@ router.get('/history', auth, async (req: AuthRequest, res: Response) => {
       take: limit,
       select: { id: true, role: true, content: true, parsedIntent: true, confidenceScore: true, createdAt: true },
     });
+    await cacheSet(cacheKey, JSON.stringify(messages), 120);
     res.json({ success: true, data: messages });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to fetch history' });
+  }
+});
+
+// POST /api/v1/chat/stream — SSE streaming response from Groq
+router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
+  const { message } = req.body;
+  if (!message?.trim()) {
+    res.status(400).json({ success: false, error: 'Message required' });
+    return;
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    const [user, vaults] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { autonomyMode: true, dailyLimit: true, dailySpent: true, flowAddress: true },
+      }),
+      prisma.vault.findMany({ where: { userId: req.userId } }),
+    ]);
+
+    const context = {
+      autonomyMode: user?.autonomyMode || 'manual',
+      dailyLimit: user?.dailyLimit,
+      dailySpent: user?.dailySpent,
+      flowAddress: user?.flowAddress,
+      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: v.balance }), {}),
+    };
+
+    // Save user message
+    await prisma.chatMessage.create({
+      data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
+    });
+
+    // Parse intent (non-streaming)
+    const groq = new GroqService();
+    const intent = await groq.parseIntent(message);
+    const executionPayload = buildExecutionPayload(intent);
+
+    // Autopilot
+    let autopilotResult: { explorerUrl?: string; ruleId?: string } | null = null;
+    if (user?.autonomyMode === 'autopilot' && executionPayload) {
+      try {
+        autopilotResult = await executeActionInternal(req.userId!, executionPayload);
+      } catch (e) {
+        logger.warn('Autopilot execution failed (stream)', { err: (e as Error).message });
+      }
+    }
+
+    // Stream the response
+    const vaultSummary = Object.entries(context.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(', ');
+    const { Groq } = await import('groq-sdk');
+    const { env: config } = await import('../config/env.js');
+    const groqClient = new Groq({ apiKey: config.groqApiKey });
+
+    const stream = await groqClient.chat.completions.create({
+      model: config.groqModel,
+      max_tokens: 300,
+      temperature: 0.7,
+      stream: true,
+      messages: [
+        {
+          role: 'system',
+          content: `You are FlowMate, an autonomous financial AI agent on Flow blockchain. Be concise (2-3 sentences). Only respond to financial topics. If off-topic, say: "I'm FlowMate, your financial agent. What would you like to do with your finances?"`,
+        },
+        {
+          role: 'user',
+          content: `User said: "${intent.intent}"\nAction: ${intent.action}\nVaults: ${vaultSummary}\nAutonomy: ${context.autonomyMode}`,
+        },
+      ],
+    });
+
+    let fullContent = '';
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content || '';
+      if (token) {
+        fullContent += token;
+        send({ token });
+      }
+    }
+
+    // Save agent message to DB
+    const agentMsg = await prisma.chatMessage.create({
+      data: {
+        userId: req.userId!,
+        role: 'agent',
+        content: fullContent,
+        parsedIntent: intent as unknown as Prisma.InputJsonValue,
+        confidenceScore: intent?.confidence ?? null,
+      },
+    });
+
+    // Invalidate Redis cache for this user's history
+    await cacheDel(`chat:history:${req.userId}`);
+
+    // Final metadata event
+    send({
+      done: true,
+      intent,
+      executionPayload: autopilotResult ? null : executionPayload,
+      autopilotResult,
+      messageId: agentMsg.id,
+    });
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (err) {
+    logger.error('Stream chat error', { err: (err as Error).message });
+    send({ error: 'AI service unavailable' });
+    res.end();
   }
 });
 

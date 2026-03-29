@@ -19,12 +19,15 @@ interface Message {
   role: "user" | "agent";
   content: string;
   time: string;
+  streaming?: boolean;
   executionPayload?: ExecutionPayload | null;
   executionResult?: { explorerUrl: string } | null;
 }
 
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const formatTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+const BASE_URL = import.meta.env.VITE_API_URL || "";
 
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -45,8 +48,10 @@ const Chat = () => {
   useEffect(() => {
     if (historyData && historyData.length > 0 && messages.length === 0) {
       setMessages(historyData.map(m => ({
-        id: m.id, role: m.role as "user" | "agent",
-        content: m.content, time: formatTime(m.createdAt),
+        id: m.id,
+        role: m.role as "user" | "agent",
+        content: m.content,
+        time: formatTime(m.createdAt),
       })));
     }
   }, [historyData]);
@@ -66,10 +71,7 @@ const Chat = () => {
       queryClient.invalidateQueries({ queryKey: ["vaults"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["all-transactions"] });
-      toast({
-        title: "Action executed!",
-        description: explorerUrl ? "Transaction confirmed on Flow testnet" : "Done",
-      });
+      toast({ title: "Action executed!", description: explorerUrl ? "Transaction confirmed on Flow testnet" : "Done" });
     } catch (err: any) {
       toast({ title: "Execution failed", description: err?.response?.data?.error || "Try again", variant: "destructive" });
     } finally {
@@ -84,25 +86,88 @@ const Chat = () => {
     const currentInput = input;
     setInput("");
     setSending(true);
-    const thinkingId = `thinking_${Date.now()}`;
-    setMessages(prev => [...prev, { id: thinkingId, role: "agent", content: "...", time: now() }]);
+
+    // Add streaming placeholder
+    const streamingId = `streaming_${Date.now()}`;
+    setMessages(prev => [...prev, { id: streamingId, role: "agent", content: "", time: now(), streaming: true }]);
+
     try {
-      const { data } = await api.post("/api/v1/chat", { message: currentInput });
-      const { reply, executionPayload, messageId } = data.data;
-      setMessages(prev =>
-        prev.filter(m => m.id !== thinkingId).concat({
-          id: messageId || Date.now().toString(),
-          role: "agent", content: reply, time: now(),
-          executionPayload: executionPayload || null,
-        })
-      );
+      const token = localStorage.getItem("flowmate_token");
+      const response = await fetch(`${BASE_URL}/api/v1/chat/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: currentInput }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+      let finalPayload: ExecutionPayload | null = null;
+      let finalMessageId = streamingId;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.token) {
+              fullContent += parsed.token;
+              setMessages(prev => prev.map(m =>
+                m.id === streamingId ? { ...m, content: fullContent } : m
+              ));
+            } else if (parsed.done) {
+              finalPayload = parsed.executionPayload || null;
+              finalMessageId = parsed.messageId || streamingId;
+            } else if (parsed.error) {
+              throw new Error(parsed.error);
+            }
+          } catch { /* malformed chunk — skip */ }
+        }
+      }
+
+      // Finalize the message
+      setMessages(prev => prev.map(m =>
+        m.id === streamingId
+          ? { ...m, id: finalMessageId, content: fullContent, streaming: false, executionPayload: finalPayload }
+          : m
+      ));
+      queryClient.invalidateQueries({ queryKey: ["chatHistory"] });
+
     } catch {
-      setMessages(prev =>
-        prev.filter(m => m.id !== thinkingId).concat({
-          id: Date.now().toString(), role: "agent", time: now(),
-          content: "I'm having trouble connecting. Please check your connection and try again.",
-        })
-      );
+      // Fallback to regular endpoint if streaming fails
+      try {
+        const { data } = await api.post("/api/v1/chat", { message: currentInput });
+        const { reply, executionPayload, messageId } = data.data;
+        setMessages(prev =>
+          prev.filter(m => m.id !== streamingId).concat({
+            id: messageId || Date.now().toString(),
+            role: "agent", content: reply, time: now(),
+            executionPayload: executionPayload || null,
+          })
+        );
+      } catch {
+        setMessages(prev =>
+          prev.filter(m => m.id !== streamingId).concat({
+            id: Date.now().toString(), role: "agent", time: now(),
+            content: "I'm having trouble connecting. Please check your connection and try again.",
+          })
+        );
+      }
     } finally {
       setSending(false);
     }
@@ -137,28 +202,38 @@ const Chat = () => {
                       <span className="text-primary font-semibold text-sm">FlowMate Agent</span>
                     </div>
                     <div className="card-secondary">
-                      {msg.content === "..." ? (
+                      {msg.streaming && msg.content === "" ? (
                         <div className="flex gap-1 py-1">
-                          {[0,1,2].map(i => <span key={i} className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+                          {[0, 1, 2].map(i => (
+                            <span key={i} className="w-2 h-2 rounded-full bg-primary/60 animate-bounce"
+                              style={{ animationDelay: `${i * 0.15}s` }} />
+                          ))}
                         </div>
                       ) : (
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <>
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          {msg.streaming && (
+                            <span className="inline-block w-1.5 h-4 bg-primary/70 ml-0.5 animate-pulse rounded-sm align-text-bottom" />
+                          )}
+                        </>
                       )}
                     </div>
                     {msg.executionPayload && (
                       <div className="card-secondary space-y-2 border border-primary/20">
                         <p className="text-xs text-muted-foreground uppercase tracking-wider">Action Ready</p>
                         <div className="text-sm space-y-1">
-                          {Object.entries(msg.executionPayload.body).filter(([,v]) => v).map(([k, v]) => (
+                          {Object.entries(msg.executionPayload.body).filter(([, v]) => v).map(([k, v]) => (
                             <div key={k} className="flex justify-between">
                               <span className="text-muted-foreground capitalize">{k}</span>
                               <span className="font-medium">{String(v)}</span>
                             </div>
                           ))}
                         </div>
-                        <button onClick={() => executeAction(msg.id, msg.executionPayload!)}
+                        <button
+                          onClick={() => executeAction(msg.id, msg.executionPayload!)}
                           disabled={executing === msg.id}
-                          className="btn-primary w-full flex items-center justify-center gap-2 text-sm disabled:opacity-60">
+                          className="btn-primary w-full flex items-center justify-center gap-2 text-sm disabled:opacity-60"
+                        >
                           {executing === msg.id ? "Executing..." : <><Zap className="w-4 h-4" /> Execute Now</>}
                         </button>
                       </div>
@@ -180,14 +255,23 @@ const Chat = () => {
             ))}
           </AnimatePresence>
         </div>
+
         <div className="absolute bottom-16 left-0 right-0 z-40 flex justify-center px-4 py-3">
           <div className="w-full max-w-md lg:max-w-lg">
             <div className="card-secondary flex items-center gap-2">
-              <input type="text" value={input} onChange={e => setInput(e.target.value)}
+              <input
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && send()}
-                placeholder="Message FlowMate..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
-              <button onClick={send} disabled={!input.trim() || sending}
-                className="p-2 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-30">
+                placeholder="Message FlowMate..."
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <button
+                onClick={send}
+                disabled={!input.trim() || sending}
+                className="p-2 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-30"
+              >
                 <Send className="w-4 h-4" />
               </button>
             </div>
