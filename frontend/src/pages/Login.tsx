@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Loader2, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import heroBg from "@/assets/hero-bg.jpg";
@@ -11,7 +11,6 @@ const Login = () => {
   const navigate = useNavigate();
   const { loginWithEmail } = useAuth();
   const [email, setEmail] = useState("");
-  const [showEmail, setShowEmail] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
@@ -31,113 +30,71 @@ const Login = () => {
 
   return (
     <div className="min-h-screen relative flex items-center justify-center overflow-hidden">
-      {/* Background with overlay */}
       <img src={heroBg} alt="" className="absolute inset-0 w-full h-full object-cover" />
-      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" />
 
-      {/* Main content */}
       <motion.div
-        initial={{ opacity: 0, y: 30 }}
+        initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        className="relative z-10 flex flex-col items-center px-6 w-full max-w-sm"
+        transition={{ duration: 0.7, ease: "easeOut" }}
+        className="relative z-10 flex flex-col items-center px-6 w-full max-w-xs"
       >
-        {/* Branding - Logo only (cleaner) */}
+        {/* Logo + wordmark */}
         <motion.div
-          className="text-center mb-12"
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          transition={{ delay: 0.2, type: "spring" }}
+          className="flex flex-col items-center gap-4 mb-10"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.15, duration: 0.5 }}
         >
-          <img
-            src={flowmateIcon}
-            alt="FlowMate"
-            width={56}
-            height={56}
-            className="mx-auto drop-shadow-lg"
-          />
+          <img src={flowmateIcon} alt="FlowMate" width={48} height={48} className="drop-shadow-lg" />
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">FlowMate</h1>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-[220px]">
+              Your autonomous financial agent on Flow.
+            </p>
+          </div>
         </motion.div>
 
-        {/* Auth form container */}
-        <div className="w-full">
-          {!showEmail ? (
-            // Initial CTA - Sign in button
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setShowEmail(true)}
-                className="btn-primary w-full flex items-center justify-center gap-3 text-base py-3 group"
-              >
-                <Mail className="w-5 h-5" />
-                Get Started
-                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </motion.button>
-            </motion.div>
-          ) : (
-            // Email form
-            <motion.form
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              onSubmit={handleEmailSignIn}
-              className="space-y-3"
-            >
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground uppercase tracking-widest font-medium">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="glass-input w-full px-4 py-3 text-sm"
-                  autoFocus
-                  disabled={loading}
-                />
-              </div>
+        {/* Form */}
+        <motion.form
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          onSubmit={handleEmailSignIn}
+          className="w-full space-y-3"
+        >
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Enter your email"
+            className="glass-input w-full px-4 py-3 text-sm"
+            autoFocus
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !email.trim()}
+            className="btn-primary w-full flex items-center justify-center gap-2 py-3 text-sm disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Sending link…
+              </>
+            ) : (
+              <>
+                Continue
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+        </motion.form>
 
-              <button
-                type="submit"
-                disabled={loading || !email.trim()}
-                className="btn-primary w-full text-base flex items-center justify-center gap-2 py-3 disabled:opacity-60 mt-4"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Sending link...
-                  </>
-                ) : (
-                  <>
-                    Continue
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEmail(false);
-                  setEmail("");
-                }}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
-              >
-                ← Back
-              </button>
-            </motion.form>
-          )}
-        </div>
-
-        {/* Footer - minimal */}
-        <div className="mt-20 text-center">
-          <p className="text-[11px] text-muted-foreground/60 tracking-wide">
-            Powered by Flow Blockchain
-          </p>
-        </div>
+        {/* Footer */}
+        <p className="mt-16 text-[11px] text-muted-foreground/50 tracking-wide">
+          Powered by Flow Blockchain
+        </p>
       </motion.div>
     </div>
   );
