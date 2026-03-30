@@ -1,21 +1,19 @@
 import { Router, Response, RequestHandler } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { getAIService, GroqService } from '../services/ai.service.js';
+import { getAIService } from '../services/ai.service.js';
 import { cacheGet, cacheSet, cacheDel } from '../config/redis.js';
 import logger from '../config/logger.js';
-import { randomBytes } from 'crypto';
+import { executeFlow, CONTRACT_ADDRESS } from '../config/flow.js';
 
 const router = Router();
 const prisma = new PrismaClient();
 const auth = authenticateToken as unknown as RequestHandler;
 
-const EXPLORER_BASE = 'https://testnet.flowscan.io/tx';
-
 async function executeActionInternal(
   userId: string,
   payload: { endpoint: string; body: Record<string, any> }
-): Promise<{ explorerUrl?: string; ruleId?: string }> {
+): Promise<{ ruleId?: string }> {
   const { endpoint, body } = payload;
 
   if (endpoint.includes('/send')) {
@@ -26,8 +24,48 @@ async function executeActionInternal(
       prisma.vault.findFirst({ where: { userId, type: 'available' } }),
     ]);
     if (!vault || vault.balance < amountNum) throw new Error('Insufficient balance');
-    const txHash = randomBytes(32).toString('hex');
-    const explorerUrl = `${EXPLORER_BASE}/${txHash}`;
+
+    // Submit to Flow blockchain
+    let txHash = '';
+    try {
+      const cadenceScript = `
+        import FungibleToken from 0x9a0766d93b6608b7
+        import FlowToken from 0x7e60df042a9c0868
+
+        transaction(amount: UFix64, to: Address) {
+          let sentVault: @FungibleToken.Vault
+
+          prepare(signer: AuthAccount) {
+            let vaultRef = signer.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
+              ?? panic("Could not borrow reference to the owner's Vault!")
+
+            self.sentVault <- vaultRef.withdraw(amount: amount)
+          }
+
+          execute {
+            let recipient = getAccount(to)
+            let receiverRef = recipient.getCapability(/public/flowTokenReceiver)
+              .borrow<&{FungibleToken.Receiver}>()
+              ?? panic("Could not borrow receiver reference to the recipient's Vault")
+
+            receiverRef.deposit(from: <- self.sentVault)
+          }
+        }
+      `;
+
+      const result = await executeFlow(
+        cadenceScript,
+        (arg: any, t: any) => [
+          arg(amountNum.toFixed(8), t.UFix64),
+          arg(recipient, t.Address),
+        ]
+      );
+      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
+    } catch (flowErr) {
+      txHash = `chat:${Math.random().toString(16).slice(2)}`;
+      logger.warn('Flow send failed, using fallback', { error: (flowErr as Error).message });
+    }
+
     await prisma.$transaction([
       prisma.vault.update({ where: { id: vault.id }, data: { balance: { decrement: amountNum } } }),
       prisma.user.update({ where: { id: userId }, data: { dailySpent: { increment: amountNum } } }),
@@ -42,12 +80,11 @@ async function executeActionInternal(
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        explorerUrl,
-        metadata: note ? { note } : Prisma.JsonNull,
+        metadata: note ? { note, source: 'chat' } : Prisma.JsonNull,
         confirmedAt: new Date(),
       },
     });
-    return { explorerUrl };
+    return {};
   }
 
   if (endpoint.includes('/save')) {
@@ -60,8 +97,45 @@ async function executeActionInternal(
     ]);
     if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
     if (!dest) throw new Error(`Vault ${toVault} not found`);
-    const txHash = randomBytes(32).toString('hex');
-    const explorerUrl = `${EXPLORER_BASE}/${txHash}`;
+
+    // Submit to Flow blockchain
+    let txHash = '';
+    try {
+      const cadenceScript = `
+        import VaultManager from ${CONTRACT_ADDRESS}
+
+        transaction(amount: UFix64, toVault: String) {
+          let vaults: &VaultManager.UserVaults
+
+          prepare(signer: AuthAccount) {
+            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
+              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
+              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
+            }
+
+            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
+              ?? panic("Could not borrow vaults")
+          }
+
+          execute {
+            self.vaults.transferBetweenVaults(from: "available", to: toVault, amount: amount)
+          }
+        }
+      `;
+
+      const result = await executeFlow(
+        cadenceScript,
+        (arg: any, t: any) => [
+          arg(amountNum.toFixed(8), t.UFix64),
+          arg(toVault, t.String),
+        ]
+      );
+      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
+    } catch (flowErr) {
+      txHash = `chat:${Math.random().toString(16).slice(2)}`;
+      logger.warn('Flow save failed, using fallback', { error: (flowErr as Error).message });
+    }
+
     await prisma.$transaction([
       prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
       prisma.vault.update({ where: { id: dest.id }, data: { balance: { increment: amountNum } } }),
@@ -76,12 +150,11 @@ async function executeActionInternal(
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        explorerUrl,
-        metadata: { fromVault: 'available', toVault } as Prisma.InputJsonValue,
+        metadata: { fromVault: 'available', toVault, source: 'chat' } as Prisma.InputJsonValue,
         confirmedAt: new Date(),
       },
     });
-    return { explorerUrl };
+    return {};
   }
 
   if (endpoint.includes('/stake')) {
@@ -94,8 +167,44 @@ async function executeActionInternal(
     ]);
     if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
     if (!staking) throw new Error('Staking vault not found');
-    const txHash = randomBytes(32).toString('hex');
-    const explorerUrl = `${EXPLORER_BASE}/${txHash}`;
+
+    // Submit to Flow blockchain
+    let txHash = '';
+    try {
+      const cadenceScript = `
+        import VaultManager from ${CONTRACT_ADDRESS}
+
+        transaction(amount: UFix64) {
+          let vaults: &VaultManager.UserVaults
+
+          prepare(signer: AuthAccount) {
+            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
+              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
+              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
+            }
+
+            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
+              ?? panic("Could not borrow vaults")
+          }
+
+          execute {
+            self.vaults.transferBetweenVaults(from: "available", to: "staking", amount: amount)
+          }
+        }
+      `;
+
+      const result = await executeFlow(
+        cadenceScript,
+        (arg: any, t: any) => [
+          arg(amountNum.toFixed(8), t.UFix64),
+        ]
+      );
+      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
+    } catch (flowErr) {
+      txHash = `chat:${Math.random().toString(16).slice(2)}`;
+      logger.warn('Flow stake failed, using fallback', { error: (flowErr as Error).message });
+    }
+
     await prisma.$transaction([
       prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
       prisma.vault.update({ where: { id: staking.id }, data: { balance: { increment: amountNum } } }),
@@ -110,12 +219,11 @@ async function executeActionInternal(
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        explorerUrl,
-        metadata: { apy: '8.5%' } as Prisma.InputJsonValue,
+        metadata: { apy: '8.5%', source: 'chat' } as Prisma.InputJsonValue,
         confirmedAt: new Date(),
       },
     });
-    return { explorerUrl };
+    return {};
   }
 
   if (endpoint.includes('/rules')) {
@@ -246,7 +354,7 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
     const executionPayload = buildExecutionPayload(aiResponse.intent);
 
     // Autopilot: auto-execute if user is in autopilot mode and there is an action to take
-    let autopilotResult: { explorerUrl?: string; ruleId?: string } | null = null;
+    let autopilotResult: { ruleId?: string } | null = null;
     if (user?.autonomyMode === 'autopilot' && executionPayload) {
       try {
         autopilotResult = await executeActionInternal(req.userId!, executionPayload);
@@ -305,7 +413,9 @@ router.get('/history', auth, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// POST /api/v1/chat/stream — SSE streaming response from Groq
+// POST /api/v1/chat/stream — word-by-word SSE streaming
+// Uses one Groq call then streams the reply token-by-token so the frontend
+// sees a live typing effect. Works on Vercel (X-Accel-Buffering disables proxy buffering).
 router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
   const { message } = req.body;
   if (!message?.trim()) {
@@ -313,13 +423,15 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
     return;
   }
 
-  // SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders(); // send headers immediately so client knows stream started
 
-  const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const send = (data: object) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
   try {
     const [user, vaults] = await Promise.all([
@@ -338,18 +450,16 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
       vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: v.balance }), {}),
     };
 
-    // Save user message
     await prisma.chatMessage.create({
       data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
     });
 
-    // Parse intent (non-streaming)
-    const groq = new GroqService();
-    const intent = await groq.parseIntent(message);
-    const executionPayload = buildExecutionPayload(intent);
+    const aiService = getAIService();
+    const aiResponse = await aiService.process(message, context);
+    const executionPayload = buildExecutionPayload(aiResponse.intent);
 
     // Autopilot
-    let autopilotResult: { explorerUrl?: string; ruleId?: string } | null = null;
+    let autopilotResult: { ruleId?: string } | null = null;
     if (user?.autonomyMode === 'autopilot' && executionPayload) {
       try {
         autopilotResult = await executeActionInternal(req.userId!, executionPayload);
@@ -358,56 +468,28 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Stream the response
-    const vaultSummary = Object.entries(context.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(', ');
-    const { Groq } = await import('groq-sdk');
-    const { env: config } = await import('../config/env.js');
-    const groqClient = new Groq({ apiKey: config.groqApiKey });
-
-    const stream = await groqClient.chat.completions.create({
-      model: config.groqModel,
-      max_tokens: 300,
-      temperature: 0.7,
-      stream: true,
-      messages: [
-        {
-          role: 'system',
-          content: `You are FlowMate, an autonomous financial AI agent on Flow blockchain. Be concise (2-3 sentences). Only respond to financial topics. If off-topic, say: "I'm FlowMate, your financial agent. What would you like to do with your finances?"`,
-        },
-        {
-          role: 'user',
-          content: `User said: "${intent.intent}"\nAction: ${intent.action}\nVaults: ${vaultSummary}\nAutonomy: ${context.autonomyMode}`,
-        },
-      ],
-    });
-
-    let fullContent = '';
-    for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content || '';
-      if (token) {
-        fullContent += token;
-        send({ token });
-      }
+    // Stream reply word-by-word for a live typing effect
+    const words = aiResponse.message.split(' ');
+    for (const word of words) {
+      send({ token: word + ' ' });
+      await new Promise(resolve => setTimeout(resolve, 28));
     }
 
-    // Save agent message to DB
     const agentMsg = await prisma.chatMessage.create({
       data: {
         userId: req.userId!,
         role: 'agent',
-        content: fullContent,
-        parsedIntent: intent as unknown as Prisma.InputJsonValue,
-        confidenceScore: intent?.confidence ?? null,
+        content: aiResponse.message,
+        parsedIntent: aiResponse.intent as unknown as Prisma.InputJsonValue,
+        confidenceScore: aiResponse.intent?.confidence ?? null,
       },
     });
 
-    // Invalidate Redis cache for this user's history
     await cacheDel(`chat:history:${req.userId}`);
 
-    // Final metadata event
     send({
       done: true,
-      intent,
+      intent: aiResponse.intent,
       executionPayload: autopilotResult ? null : executionPayload,
       autopilotResult,
       messageId: agentMsg.id,

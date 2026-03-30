@@ -21,18 +21,19 @@ const vaultOptions = [
 const SaveModal = ({ isOpen, onClose, availableBalance = 0 }: SaveModalProps) => {
   const [amount, setAmount] = useState("");
   const [toVault, setToVault] = useState("savings");
-  const [txResult, setTxResult] = useState<{ txHash: string; explorerUrl: string } | null>(null);
+  const [txResult, setTxResult] = useState<{ txHash: string; explorerUrl: string | null } | null>(null);
   const [done, setDone] = useState(false);
   const queryClient = useQueryClient();
 
   const saveMutation = useMutation({
     mutationFn: () => api.post("/api/v1/transactions/save", { amount: parseFloat(amount), toVault }),
     onSuccess: (res) => {
-      const { transaction, explorerUrl } = res.data.data;
-      setTxResult({ txHash: transaction.txHash, explorerUrl });
+      const { transaction } = res.data.data;
+      setTxResult({ txHash: transaction.txHash, explorerUrl: transaction.explorerUrl || null });
       setDone(true);
       queryClient.invalidateQueries({ queryKey: ["vaults"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["all-transactions"] });
     },
     onError: (err: any) => {
       toast({ title: "Save failed", description: err?.response?.data?.error || "Transfer failed", variant: "destructive" });
@@ -97,7 +98,7 @@ const SaveModal = ({ isOpen, onClose, availableBalance = 0 }: SaveModalProps) =>
               <h3 className="text-lg font-bold">Saved Successfully!</h3>
               <p className="text-sm text-muted-foreground">{parseFloat(amount).toLocaleString()} FLOW → {vaultOptions.find(v => v.id === toVault)?.label}</p>
             </div>
-            {txResult && (
+            {txResult?.explorerUrl && (
               <a href={txResult.explorerUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-primary hover:underline">
                 <ExternalLink className="w-4 h-4" /> View on Flowscan
               </a>

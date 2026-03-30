@@ -72,9 +72,8 @@ router.post('/login', async (req: Request, res: Response) => {
         ],
       });
 
-      // Create a pending transaction record immediately (optimistic)
-      const pendingHash = randomBytes(32).toString('hex');
-      const pendingExplorerUrl = `https://testnet.flowscan.io/tx/${pendingHash}`;
+      // Create a pending transaction record — explorerUrl will be set when on-chain tx confirms
+      const pendingHash = `pending:${randomBytes(16).toString('hex')}`;
 
       await prisma.transaction.create({
         data: {
@@ -85,13 +84,11 @@ router.post('/login', async (req: Request, res: Response) => {
           toAddress: flowAddress,
           amount: WELCOME_AMOUNT,
           token: 'FLOW',
-          status: 'confirmed',
-          explorerUrl: pendingExplorerUrl,
+          status: 'pending',
           metadata: {
             note: 'Welcome bonus from FlowMate treasury',
             source: 'welcome_bonus',
           } as Prisma.InputJsonValue,
-          confirmedAt: new Date(),
         },
       });
 
@@ -104,15 +101,13 @@ router.post('/login', async (req: Request, res: Response) => {
           body: `${WELCOME_AMOUNT} FLOW has been sent to your wallet from the FlowMate treasury. Start saving, sending, and investing autonomously!`,
           metadata: {
             amount: WELCOME_AMOUNT,
-            explorerUrl: pendingExplorerUrl,
-            txHash: pendingHash,
           } as Prisma.InputJsonValue,
         },
       });
 
       logger.info('New user seeded with welcome bonus', { userId: user.id, email, amount: WELCOME_AMOUNT });
 
-      // Fire-and-forget: try real on-chain transfer, update txHash if successful
+      // Fire-and-forget: try real on-chain transfer; update record with real txId if successful
       sendWelcomeFlow(flowAddress).then(async (realTxId) => {
         if (realTxId) {
           const realExplorerUrl = `https://testnet.flowscan.io/tx/${realTxId}`;
@@ -122,6 +117,8 @@ router.post('/login', async (req: Request, res: Response) => {
               data: {
                 txHash: realTxId,
                 explorerUrl: realExplorerUrl,
+                status: 'confirmed',
+                confirmedAt: new Date(),
                 metadata: {
                   note: 'Welcome bonus from FlowMate treasury',
                   source: 'welcome_bonus',
@@ -130,7 +127,7 @@ router.post('/login', async (req: Request, res: Response) => {
               },
             });
             await prisma.notification.updateMany({
-              where: { userId: user.id, type: 'payment_sent' },
+              where: { userId: user.id, type: 'payment_sent', metadata: { path: ['amount'], equals: WELCOME_AMOUNT } },
               data: {
                 metadata: {
                   amount: WELCOME_AMOUNT,
@@ -140,7 +137,7 @@ router.post('/login', async (req: Request, res: Response) => {
                 } as Prisma.InputJsonValue,
               },
             });
-            logger.info('Welcome bonus updated with real txId', { userId: user.id, realTxId });
+            logger.info('Welcome bonus confirmed on-chain', { userId: user.id, realTxId });
           } catch (e) {
             logger.warn('Failed to update welcome tx with real txId', { err: (e as Error).message });
           }

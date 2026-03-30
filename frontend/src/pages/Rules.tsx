@@ -71,9 +71,11 @@ const Rules = () => {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rules"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["all-transactions"] });
       setShowCreate(false);
       setForm({ type: "save", amount: "", toVault: "savings", recipient: "", frequency: "weekly", dayOfWeek: 5, time: "09:00" });
-      toast({ title: "Rule created", description: "Automation is now active" });
+      toast({ title: "Automation created", description: "Your rule is scheduled. It will execute automatically on the next run date." });
     },
     onError: (err: any) => {
       toast({ title: "Failed", description: err?.response?.data?.error || "Try again", variant: "destructive" });

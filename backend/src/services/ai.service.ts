@@ -1,200 +1,113 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { Groq } from "groq-sdk";
-import axios from "axios";
 import { env as config } from "../config/env.js";
 import { ParsedIntent, AIResponse } from "../types/index.js";
 import logger from "../config/logger.js";
 
-const INTENT_PROMPT = `You are FlowMate's AI financial agent running on Flow blockchain. Parse user messages into structured financial intents.
+/**
+ * Single-call prompt: returns intent JSON + reply in one Groq request.
+ * Halves latency vs the old two-call approach (important for Vercel 10s timeout).
+ */
+const COMBINED_PROMPT = `You are FlowMate, an autonomous financial AI agent on Flow blockchain.
 
-IMPORTANT: You ONLY handle financial topics. If the user asks about anything unrelated to personal finance, payments, savings, investments, blockchain, or FlowMate features, set action to "off_topic".
-
-Return ONLY valid JSON with this exact structure:
+Given a user message and their wallet context, return ONLY valid JSON in this exact shape:
 {
-  "action": "send|receive|save|swap|stake|dca|bill|query|off_topic|unknown",
-  "intent": "short description of what the user wants",
+  "action": "send|receive|save|swap|stake|dca|query|off_topic|unknown",
+  "intent": "short description",
   "parameters": {
-    "recipient": "0x address or name",
+    "recipient": "0x address",
     "amount": 100,
     "vault": "savings|emergency|staking",
     "fromVault": "available",
     "toVault": "savings",
-    "frequency": "weekly|daily|monthly",
+    "frequency": "daily|weekly|biweekly|monthly",
     "note": "optional memo"
   },
   "confidence": 0.95,
-  "requiresConfirmation": true
+  "requiresConfirmation": true,
+  "reply": "Your conversational response to the user (2-3 sentences max)"
 }
+
+Rules:
+- Only handle: send, save, stake, swap, DCA, balance queries, FlowMate features
+- Off-topic (jokes, coding, recipes etc): set action "off_topic", reply "I'm FlowMate, your financial agent. I can help you send, save, stake or invest FLOW. What would you like to do?"
+- reply must confirm the action details when a financial action is detected
+- reply must mention vault balances when relevant
+- reply is 2-3 sentences max, conversational tone
 
 Examples:
-- "send 50 FLOW to 0xabc123" → action: "send", parameters: { recipient: "0xabc123", amount: 50 }
-- "save $100 to my savings" → action: "save", parameters: { amount: 100, vault: "savings" }
-- "stake 200 FLOW" → action: "stake", parameters: { amount: 200 }
-- "move 500 from available to emergency fund" → action: "swap", parameters: { fromVault: "available", toVault: "emergency", amount: 500 }
-- "tell me a joke" → action: "off_topic"`;
+- "send 50 FLOW to 0xabc" → action:"send", parameters:{recipient:"0xabc",amount:50}, reply:"Got it! I'll send 50 FLOW to 0xabc. Tap Execute Now to confirm."
+- "save 100 to savings weekly" → action:"save", parameters:{amount:100,vault:"savings",frequency:"weekly"}, reply:"I'll set up a weekly auto-save of 100 FLOW to your savings vault."
+- "what's my balance" → action:"query", reply:"Here's your current vault summary: [balances]. Your total wealth is [X] FLOW."
+- "tell me a joke" → action:"off_topic", reply:"I'm FlowMate, your financial agent. I can help you send, save, stake or invest FLOW. What would you like to do?"`;
 
-const RESPONSE_PROMPT = `You are FlowMate, an autonomous financial AI agent on Flow blockchain. You help users manage their money intelligently.
-
-Your capabilities:
-- Send FLOW tokens to any address
-- Save funds into vaults: savings, emergency, staking
-- Swap between vaults (available, savings, emergency, staking)
-- Stake FLOW for ~8.5% APY in the staking vault
-- Set up recurring DCA (dollar-cost averaging) schedules
-- Answer questions about the user's balances and transactions
-
-IMPORTANT RULES:
-1. ONLY respond to financial topics. If asked about anything else (coding, recipes, general knowledge, etc.), politely say: "I'm FlowMate, your financial agent. I can help you send money, save, stake, or manage your FLOW assets. What would you like to do with your finances today?"
-2. Be concise — 2-3 sentences max.
-3. When you recognize an action (send/save/stake/swap), confirm the details clearly.
-4. Always mention current vault balances when relevant.`;
-
-abstract class AIService {
-  abstract parseIntent(userMessage: string): Promise<ParsedIntent>;
-  abstract generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string>;
-
-  async process(userMessage: string, context?: Record<string, any>): Promise<AIResponse> {
-    try {
-      const intent = await this.parseIntent(userMessage);
-      const message = await this.generateResponse(intent, context || {});
-      return { message, intent, actionRequired: intent.requiresConfirmation };
-    } catch (error) {
-      logger.error("AI processing error", { error: (error as Error).message });
-      throw error;
-    }
-  }
-}
-
-// ── Claude ───────────────────────────────────────────────────────────────────
-
-class ClaudeAIService extends AIService {
-  private client: Anthropic;
-
-  constructor() {
-    super();
-    this.client = new Anthropic({ apiKey: config.claudeApiKey });
-  }
-
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const response = await this.client.messages.create({
-      model: config.claudeModel,
-      max_tokens: 500,
-      system: INTENT_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
-    const content = response.content[0];
-    if (content.type !== "text") throw new Error("Invalid response type");
-    try {
-      return JSON.parse(content.text);
-    } catch {
-      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
-    }
-  }
-
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const response = await this.client.messages.create({
-      model: config.claudeModel,
-      max_tokens: 300,
-      system: RESPONSE_PROMPT,
-      messages: [{ role: "user", content: `User intent: ${intent.action} — ${intent.intent}\nContext: ${JSON.stringify(context)}` }],
-    });
-    const content = response.content[0];
-    if (content.type !== "text") throw new Error("Invalid response type");
-    return content.text;
-  }
-}
-
-// ── Groq ─────────────────────────────────────────────────────────────────────
-
-class GroqService extends AIService {
+class GroqService {
   private client: Groq;
 
   constructor() {
-    super();
     this.client = new Groq({ apiKey: config.groqApiKey });
   }
 
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const response = await this.client.chat.completions.create({
-      model: config.groqModel,
-      max_tokens: 500,
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: INTENT_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-    });
-    const text = response.choices[0].message.content || "";
-    // Extract JSON even if model adds surrounding text
-    const match = text.match(/\{[\s\S]*\}/);
-    try {
-      return JSON.parse(match ? match[0] : text);
-    } catch {
-      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
-    }
-  }
-
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const vaultSummary = context.vaults
-      ? Object.entries(context.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(", ")
+  async process(userMessage: string, context?: Record<string, any>): Promise<AIResponse> {
+    const ctx = context || {};
+    const vaultSummary = ctx.vaults
+      ? Object.entries(ctx.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(", ")
       : "no vault data";
-    const response = await this.client.chat.completions.create({
-      model: config.groqModel,
-      max_tokens: 300,
-      temperature: 0.7,
-      messages: [
-        { role: "system", content: RESPONSE_PROMPT },
-        {
-          role: "user",
-          content: `User said: "${intent.intent}"\nAction: ${intent.action}\nVaults: ${vaultSummary}\nAutonomy: ${context.autonomyMode || "manual"}`,
-        },
-      ],
-    });
-    return response.choices[0].message.content || "I'm on it. Let me process that for you.";
-  }
-}
 
-// ── Ollama (local) ────────────────────────────────────────────────────────────
+    const userContent = [
+      `User: "${userMessage}"`,
+      `Vaults: ${vaultSummary}`,
+      `Autonomy mode: ${ctx.autonomyMode || "manual"}`,
+      ctx.flowAddress ? `User wallet: ${ctx.flowAddress}` : "",
+    ].filter(Boolean).join("\n");
 
-class OllamaService extends AIService {
-  async parseIntent(userMessage: string): Promise<ParsedIntent> {
-    const response = await axios.post(`${config.ollamaUrl}/api/generate`, {
-      model: config.ollamaModel,
-      prompt: `${INTENT_PROMPT}\n\nMessage: ${userMessage}`,
-      stream: false,
-    });
     try {
-      return JSON.parse(response.data.response || "{}");
-    } catch {
-      return { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: true };
+      const response = await this.client.chat.completions.create({
+        model: config.groqModel,
+        max_tokens: 600,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: COMBINED_PROMPT },
+          { role: "user", content: userContent },
+        ],
+      });
+
+      const text = response.choices[0].message.content || "";
+      const match = text.match(/\{[\s\S]*\}/);
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(match ? match[0] : text);
+      } catch {
+        // Model returned non-JSON — treat as a plain reply
+        return {
+          message: text.trim() || "I'm on it! Let me process that for you.",
+          intent: { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: false },
+          actionRequired: false,
+        };
+      }
+
+      const intent: ParsedIntent = {
+        action: parsed.action || "unknown",
+        intent: parsed.intent || userMessage,
+        parameters: parsed.parameters || {},
+        confidence: parsed.confidence ?? 0.8,
+        requiresConfirmation: parsed.requiresConfirmation ?? true,
+      };
+
+      const message = parsed.reply || "Got it! How else can I help you?";
+
+      return { message, intent, actionRequired: intent.requiresConfirmation };
+    } catch (error) {
+      logger.error("Groq API error", { error: (error as Error).message, model: config.groqModel });
+      throw error;
     }
   }
 
-  async generateResponse(intent: ParsedIntent, context: Record<string, any>): Promise<string> {
-    const response = await axios.post(`${config.ollamaUrl}/api/generate`, {
-      model: config.ollamaModel,
-      prompt: `${RESPONSE_PROMPT}\n\nIntent: ${intent.action}\nContext: ${JSON.stringify(context)}`,
-      stream: false,
-    });
-    return response.data.response || "Unable to generate response";
+  async parseIntent(userMessage: string): Promise<ParsedIntent | null> {
+    const result = await this.process(userMessage);
+    return result.intent;
   }
 }
 
-// ── Factory ───────────────────────────────────────────────────────────────────
-
-export const getAIService = (): AIService => {
-  switch (config.aiProvider) {
-    case "claude":
-      return new ClaudeAIService();
-    case "groq":
-      return new GroqService();
-    case "ollama":
-    case "llama":
-      return new OllamaService();
-    default:
-      // Default to Groq since it's configured
-      return new GroqService();
-  }
-};
-
-export { AIService, ClaudeAIService, GroqService, OllamaService };
+export const getAIService = (): GroqService => new GroqService();
+export { GroqService };

@@ -1,11 +1,17 @@
 import { Router, Response, RequestHandler } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import logger from '../config/logger.js';
+import { scheduleRule } from '../services/rule-executor.service.js';
 
 const router = Router();
 const prisma = new PrismaClient();
 const auth = authenticateToken as unknown as RequestHandler;
+
+const FREQ_LABELS: Record<string, string> = {
+  daily: 'daily', weekly: 'weekly', biweekly: 'bi-weekly', monthly: 'monthly',
+};
 
 // GET /api/v1/rules — list all rules for user
 router.get('/', auth, async (req: AuthRequest, res: Response) => {
@@ -58,6 +64,36 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
         } : undefined,
       },
       include: { scheduledTransaction: true },
+    });
+
+    // Schedule the rule in the job queue
+    try {
+      await scheduleRule(rule.id, req.userId!, nextExecution);
+      logger.info('Rule scheduled in queue', { ruleId: rule.id, nextExecution });
+    } catch (scheduleErr) {
+      logger.warn('Failed to schedule rule in queue', { error: (scheduleErr as Error).message });
+      // Don't fail the request, rule is still created
+    }
+
+    // Create a pending transaction record so the rule appears in activity history
+    await prisma.transaction.create({
+      data: {
+        userId: req.userId!,
+        ruleId: rule.id,
+        txHash: `rule:${randomBytes(12).toString('hex')}`,
+        type: type === 'dca' ? 'swap' : type,
+        fromAddress: 'automation',
+        toAddress: type === 'save' ? `vault:${config.toVault || 'savings'}` : (config.recipient || 'scheduled'),
+        amount: parseFloat(config.amount),
+        token: 'FLOW',
+        status: 'pending',
+        metadata: {
+          note: `Recurring ${FREQ_LABELS[frequency || 'weekly'] || frequency} automation — executes next on ${nextExecution.toLocaleDateString()}`,
+          ruleType: type,
+          frequency: frequency || 'weekly',
+          isScheduled: true,
+        },
+      },
     });
 
     logger.info('Rule created', { userId: req.userId, type, ruleId: rule.id });

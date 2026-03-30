@@ -19,17 +19,18 @@ const SendModal = ({ isOpen, onClose, availableBalance = 0 }: SendModalProps) =>
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [txResult, setTxResult] = useState<{ txHash: string; explorerUrl: string } | null>(null);
+  const [txResult, setTxResult] = useState<{ txHash: string; explorerUrl: string | null } | null>(null);
   const queryClient = useQueryClient();
 
   const sendMutation = useMutation({
     mutationFn: () => api.post("/api/v1/transactions/send", { recipient, amount: parseFloat(amount), note }),
     onSuccess: (res) => {
-      const { transaction, explorerUrl } = res.data.data;
-      setTxResult({ txHash: transaction.txHash, explorerUrl });
+      const { transaction } = res.data.data;
+      setTxResult({ txHash: transaction.txHash, explorerUrl: transaction.explorerUrl || null });
       setStep("success");
       queryClient.invalidateQueries({ queryKey: ["vaults"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["all-transactions"] });
     },
     onError: (err: any) => {
       toast({ title: "Transaction failed", description: err?.response?.data?.error || "Send failed", variant: "destructive" });
@@ -123,7 +124,7 @@ const SendModal = ({ isOpen, onClose, availableBalance = 0 }: SendModalProps) =>
               <h3 className="text-lg font-bold">Sent Successfully!</h3>
               <p className="text-sm text-muted-foreground">{parseFloat(amount).toLocaleString()} FLOW to {recipient.slice(0, 8)}...{recipient.slice(-4)}</p>
             </div>
-            {txResult && (
+            {txResult?.explorerUrl && (
               <a href={txResult.explorerUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm text-primary hover:underline">
                 <ExternalLink className="w-4 h-4" /> View on Flowscan

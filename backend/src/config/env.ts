@@ -38,7 +38,7 @@ export const env = {
   claudeApiKey: e('CLAUDE_API_KEY'),
   claudeModel: e('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022'),
   groqApiKey: e('GROQ_API_KEY'),
-  groqModel: e('GROQ_MODEL', 'mixtral-8x7b-32768'),
+  groqModel: e('GROQ_MODEL', 'llama3-8b-8192'), // mixtral-8x7b-32768 was discontinued
   ollamaUrl: e('OLLAMA_URL', 'http://localhost:11434'),
   ollamaModel: e('OLLAMA_MODEL', 'llama2'),
 

@@ -13,6 +13,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
     "db:push": "prisma db push",
+    "db:clean": "ts-node prisma/clean.ts",
     "prisma:studio": "prisma studio",
     "lint": "eslint src",
     "format": "prettier --write src",
