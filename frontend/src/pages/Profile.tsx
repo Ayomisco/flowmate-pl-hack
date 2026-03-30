@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   User,
@@ -11,6 +12,9 @@ import {
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/hooks/use-toast";
+import api from "@/lib/api";
 
 const fadeUp = {
   initial: { opacity: 0, y: 16 },
@@ -20,20 +24,63 @@ const fadeUp = {
 
 const Profile = () => {
   const navigate = useNavigate();
-  const [saved, setSaved] = useState(false);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [form, setForm] = useState({
-    name: "Amaka Obi",
-    email: "amaka@email.com",
-    phone: "+234 801 234 5678",
-    location: "Lagos, Nigeria",
+    name: "",
+    email: "",
+    phone: "",
+    location: "",
   });
+
+  // Fetch user profile
+  const { data: profile, isLoading } = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => {
+      const { data } = await api.get("/api/v1/users/me");
+      return data.data;
+    },
+  });
+
+  // Update form when profile loads
+  useEffect(() => {
+    if (profile) {
+      setForm({
+        name: profile.name || "",
+        email: profile.email || "",
+        phone: profile.phone || "",
+        location: profile.location || "",
+      });
+    }
+  }, [profile]);
 
   const update = (key: string, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // Save profile mutation
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api.put("/api/v1/users/me/profile", {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        location: form.location,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast({ title: "Success", description: "Profile updated" });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update profile",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    saveMutation.mutate();
   };
 
   return (
@@ -95,9 +142,13 @@ const Profile = () => {
               Flow Wallet
             </label>
             <div className="glass-card px-4 py-3 mt-1.5 flex items-center justify-between">
-              <span className="text-sm font-mono text-muted-foreground">0x1a2b...9f3d</span>
+              <span className="text-sm font-mono text-muted-foreground">
+                {user?.walletAddress
+                  ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}`
+                  : "Not connected"}
+              </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary uppercase tracking-wider font-semibold">
-                Connected
+                {user?.walletAddress ? "Connected" : "Disconnected"}
               </span>
             </div>
           </motion.div>
@@ -106,11 +157,17 @@ const Profile = () => {
           <motion.div {...fadeUp} transition={{ delay: 0.3 }}>
             <button
               onClick={handleSave}
-              className={`btn-primary w-full flex items-center justify-center gap-2 ${
-                saved ? "bg-primary/80" : ""
+              disabled={saveMutation.isPending}
+              className={`btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                saveMutation.isSuccess ? "bg-primary/80" : ""
               }`}
             >
-              {saved ? (
+              {saveMutation.isPending ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : saveMutation.isSuccess ? (
                 <>
                   <Check className="w-4 h-4" /> Saved
                 </>
