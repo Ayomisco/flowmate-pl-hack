@@ -17,6 +17,7 @@ COPY prisma ./prisma
 
 # Install all dependencies and build
 RUN npm ci && \
+    npx prisma generate && \
     npm run build && \
     npm prune --production && \
     npm cache clean --force
