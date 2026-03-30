@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Fingerprint, Loader2 } from "lucide-react";
+import { Mail, Loader2, ArrowRight } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import heroBg from "@/assets/hero-bg.jpg";
@@ -31,101 +31,127 @@ const Login = () => {
 
   return (
     <div className="min-h-screen relative flex items-center justify-center overflow-hidden">
+      {/* Background with overlay */}
       <img src={heroBg} alt="" className="absolute inset-0 w-full h-full object-cover" />
       <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" />
 
+      {/* Main content */}
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
         className="relative z-10 flex flex-col items-center px-6 w-full max-w-sm"
       >
-        <motion.img
-          src={flowmateIcon} alt="FlowMate" width={72} height={72}
-          className="mb-4 drop-shadow-lg"
-          initial={{ scale: 0.8 }} animate={{ scale: 1 }}
+        {/* Branding - Logo only (cleaner) */}
+        <motion.div
+          className="text-center mb-16"
+          initial={{ scale: 0.8 }}
+          animate={{ scale: 1 }}
           transition={{ delay: 0.2, type: "spring" }}
-        />
-        <h1 className="text-4xl font-bold tracking-tight mb-1">FlowMate</h1>
-        <p className="text-muted-foreground text-sm tracking-[0.2em] uppercase mb-10">
-          Autonomous Financial Agent
-        </p>
-
-        <div className="glass-card px-6 py-4 text-center mb-6 w-full">
-          <p className="text-base font-body leading-relaxed">
-            Your autonomous financial operating system.<br />
-            <span className="text-primary font-semibold text-glow">Save automatically.</span>{" "}
-            <span className="text-primary font-semibold text-glow">Send intelligently.</span>{" "}
-            <span className="text-primary font-semibold text-glow">Invest autonomously.</span>
+        >
+          <img
+            src={flowmateIcon}
+            alt="FlowMate"
+            width={64}
+            height={64}
+            className="mx-auto drop-shadow-lg mb-6"
+          />
+          <p className="text-muted-foreground text-sm tracking-widest uppercase font-medium">
+            Autonomous Financial Agent
           </p>
-        </div>
+        </motion.div>
 
-        <div className="status-badge mb-10">
-          <span className="glow-dot" />
-          Network Active · Flow Testnet
-        </div>
-
-        <div className="w-full space-y-3">
+        {/* Auth form container */}
+        <div className="w-full">
           {!showEmail ? (
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setShowEmail(true)}
-              className="btn-primary w-full flex items-center justify-center gap-3 text-base"
+            // Initial CTA - Sign in button
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="space-y-4"
             >
-              <Mail className="w-5 h-5" />
-              Sign in with Email
-            </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setShowEmail(true)}
+                className="btn-primary w-full flex items-center justify-center gap-3 text-base py-3 group"
+              >
+                <Mail className="w-5 h-5" />
+                Get Started
+                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </motion.button>
+
+              <p className="text-xs text-muted-foreground/70 text-center px-2 mt-4">
+                Sign in or create account with your email • No password required
+              </p>
+            </motion.div>
           ) : (
+            // Email form
             <motion.form
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               onSubmit={handleEmailSignIn}
               className="space-y-3"
             >
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="your@email.com"
-                className="glass-input w-full px-4 py-3 text-sm"
-                autoFocus
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground text-center px-2">
-                We'll send a one-time code to your email. No password needed.
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground uppercase tracking-widest font-medium">
+                  Email address
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="glass-input w-full px-4 py-3 text-sm"
+                  autoFocus
+                  disabled={loading}
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground/70 px-2">
+                We'll send a magic link to your email. Click it to sign in.
               </p>
+
               <button
                 type="submit"
                 disabled={loading || !email.trim()}
-                className="btn-primary w-full text-base flex items-center justify-center gap-2 disabled:opacity-60"
+                className="btn-primary w-full text-base flex items-center justify-center gap-2 py-3 disabled:opacity-60 mt-4"
               >
                 {loading ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> Sending code...</>
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending link...
+                  </>
                 ) : (
-                  "Continue"
+                  <>
+                    Continue
+                    <ArrowRight className="w-4 h-4" />
+                  </>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmail(false);
+                  setEmail("");
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
+              >
+                ← Back
               </button>
             </motion.form>
           )}
-
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setShowEmail(true)}
-            className="btn-glass w-full flex items-center justify-center gap-3 text-base"
-          >
-            <Fingerprint className="w-5 h-5" />
-            Create Account
-          </motion.button>
         </div>
 
-        <div className="flex items-center gap-6 mt-10 text-xs text-muted-foreground tracking-widest uppercase">
-          <button className="hover:text-foreground transition-colors">Privacy</button>
-          <button className="hover:text-foreground transition-colors">Terms</button>
-          <button className="hover:text-foreground transition-colors">Nodes</button>
+        {/* Footer attribution - minimal */}
+        <div className="mt-16 text-center">
+          <p className="text-xs text-muted-foreground/80 tracking-wider">
+            Powered by{" "}
+            <span className="text-primary font-medium">Magic Link</span> &{" "}
+            <span className="text-primary font-medium">Flow Blockchain</span>
+          </p>
         </div>
-        <p className="text-[10px] text-muted-foreground/60 mt-3 tracking-wider uppercase">
-          Powered by Magic Link · Flow Blockchain
-        </p>
       </motion.div>
     </div>
   );
