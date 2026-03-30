@@ -30,6 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
+    "prisma": "^5.8.0",
     "@magic-sdk/admin": "^2.8.2",
     "@noble/curves": "^2.0.1",
     "@onflow/fcl": "^1.4.0",
@@ -61,7 +62,6 @@
     "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",
     "prettier": "^3.1.1",
-    "prisma": "^5.8.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
