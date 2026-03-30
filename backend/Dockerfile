@@ -55,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Run the application
-CMD ["sh", "-c", "npm run db:migrate:deploy && node dist/src/server.js"]
+CMD ["sh", "-c", "node dist/src/server.js"]
