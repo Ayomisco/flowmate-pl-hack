@@ -1,91 +1,112 @@
 import logger from "../config/logger.js";
+import { prisma } from "../config/database.js";
 
 /**
  * Transaction Service
- * Handles transaction execution and tracking
+ * Handles transaction tracking and history
+ *
+ * NOTE: Actual transaction execution is handled in routes via Flow SDK
+ * This service focused on data persistence and retrieval
  */
 
 export class TransactionService {
-  /**
-   * Execute a financial transaction
-   */
-  async executeTransaction(
-    userId: string,
-    transactionType: string,
-    params: Record<string, any>
-  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
-    try {
-      logger.info("Executing transaction", { userId, transactionType });
-
-      // Placeholder for actual transaction execution
-      // In production, this would call blockchain methods
-
-      const txHash = `0x${Math.random().toString(16).slice(2)}`;
-
-      return {
-        success: true,
-        txHash,
-      };
-    } catch (error) {
-      logger.error("Transaction execution failed", {
-        userId,
-        error: (error as Error).message,
-      });
-      return {
-        success: false,
-        error: (error as Error).message,
-      };
-    }
-  }
-
   /**
    * Track transaction in database
    */
   async trackTransaction(
     userId: string,
-    txData: Record<string, any>
-  ): Promise<Record<string, any>> {
+    transactionData: {
+      type: string;
+      amount: number;
+      fromVault?: string;
+      toVault?: string;
+      txHash: string;
+      explorerUrl?: string;
+      status?: string;
+    }
+  ) {
     try {
-      // Placeholder - would insert into database
-      logger.info("Transaction tracked", { userId, txHash: txData.txHash });
+      const transaction = await prisma.transaction.create({
+        data: {
+          userId,
+          type: transactionData.type,
+          amount: transactionData.amount,
+          fromVault: transactionData.fromVault,
+          toVault: transactionData.toVault,
+          txHash: transactionData.txHash,
+          explorerUrl: transactionData.explorerUrl,
+          status: transactionData.status || "pending",
+        },
+      });
 
-      return {
-        id: `tx_${Date.now()}`,
-        ...txData,
-        createdAt: new Date(),
-      };
+      logger.info("Transaction tracked", { userId, txHash: transactionData.txHash, transactionId: transaction.id });
+      return transaction;
     } catch (error) {
       logger.error("Transaction tracking failed", {
         error: (error as Error).message,
+        userId,
       });
       throw error;
     }
   }
 
   /**
-   * Get transaction history
+   * Get transaction history for user
    */
-  async getTransactionHistory(
-    userId: string,
-    limit: number = 20
-  ): Promise<Record<string, any>[]> {
+  async getTransactionHistory(userId: string, limit: number = 20) {
     try {
-      // Placeholder - would fetch from database
-      logger.info("Fetching transaction history", { userId, limit });
+      const transactions = await prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      });
 
-      return [
-        {
-          id: "tx_1",
-          userId,
-          type: "send",
-          amount: 100,
-          status: "confirmed",
-          createdAt: new Date(),
-        },
-      ];
+      logger.info("Fetched transaction history", { userId, count: transactions.length });
+      return transactions;
     } catch (error) {
       logger.error("Failed to fetch transaction history", {
         error: (error as Error).message,
+        userId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get transaction by hash
+   */
+  async getTransactionByHash(txHash: string) {
+    try {
+      const transaction = await prisma.transaction.findUnique({
+        where: { txHash },
+      });
+
+      return transaction;
+    } catch (error) {
+      logger.error("Failed to fetch transaction by hash", {
+        error: (error as Error).message,
+        txHash,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Update transaction status
+   */
+  async updateTransactionStatus(txHash: string, status: string) {
+    try {
+      const transaction = await prisma.transaction.update({
+        where: { txHash },
+        data: { status },
+      });
+
+      logger.info("Transaction status updated", { txHash, status });
+      return transaction;
+    } catch (error) {
+      logger.error("Failed to update transaction status", {
+        error: (error as Error).message,
+        txHash,
       });
       throw error;
     }
