@@ -1,5 +1,7 @@
+import { PrismaClient } from '@prisma/client';
 import logger from "../config/logger.js";
-import { prisma } from "../config/database.js";
+
+const prisma = new PrismaClient();
 
 /**
  * Transaction Service
