@@ -164,7 +164,7 @@ curl https://<your-railway-domain>.railway.app/health
 # {"status": "ok", "timestamp": "2026-03-30T..."}
 ```
 
-✅ **Backend is live!** Save this URL for the frontendconfig.
+✅ **Backend is live!** Save this URL for the frontend config.
 
 ---
 
