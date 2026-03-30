@@ -6,7 +6,7 @@
     "dockerfile": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "sh -c 'prisma migrate resolve --applied init 2>/dev/null; prisma migrate deploy && node dist/src/server.js'",
+    "startCommand": "node dist/src/server.js",
     "restartPolicy": "always",
     "numReplicas": 1
   }
