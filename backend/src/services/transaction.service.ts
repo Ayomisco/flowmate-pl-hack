@@ -20,8 +20,8 @@ export class TransactionService {
     transactionData: {
       type: string;
       amount: number;
-      fromVault?: string;
-      toVault?: string;
+      fromAddress?: string;
+      toAddress?: string;
       txHash: string;
       explorerUrl?: string;
       status?: string;
@@ -33,8 +33,8 @@ export class TransactionService {
           userId,
           type: transactionData.type,
           amount: transactionData.amount,
-          fromVault: transactionData.fromVault,
-          toVault: transactionData.toVault,
+          fromAddress: transactionData.fromAddress || "",
+          toAddress: transactionData.toAddress || "",
           txHash: transactionData.txHash,
           explorerUrl: transactionData.explorerUrl,
           status: transactionData.status || "pending",
