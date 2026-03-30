@@ -11,16 +11,15 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies with production flag for faster install
-RUN npm ci --only=production && \
-    npm cache clean --force
-
-# Copy source and build
+# Copy source files before building
 COPY src ./src
 COPY prisma ./prisma
 
-# Build TypeScript
-RUN npm run build
+# Install all dependencies and build
+RUN npm ci && \
+    npm run build && \
+    npm prune --production && \
+    npm cache clean --force
 
 # Stage 2: Production
 FROM node:22-alpine
