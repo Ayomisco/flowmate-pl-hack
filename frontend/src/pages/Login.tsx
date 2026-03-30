@@ -44,7 +44,7 @@ const Login = () => {
       >
         {/* Branding - Logo only (cleaner) */}
         <motion.div
-          className="text-center mb-16"
+          className="text-center mb-12"
           initial={{ scale: 0.8 }}
           animate={{ scale: 1 }}
           transition={{ delay: 0.2, type: "spring" }}
@@ -52,13 +52,10 @@ const Login = () => {
           <img
             src={flowmateIcon}
             alt="FlowMate"
-            width={64}
-            height={64}
-            className="mx-auto drop-shadow-lg mb-6"
+            width={56}
+            height={56}
+            className="mx-auto drop-shadow-lg"
           />
-          <p className="text-muted-foreground text-sm tracking-widest uppercase font-medium">
-            Autonomous Financial Agent
-          </p>
         </motion.div>
 
         {/* Auth form container */}
@@ -69,7 +66,6 @@ const Login = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
-              className="space-y-4"
             >
               <motion.button
                 whileTap={{ scale: 0.97 }}
@@ -80,10 +76,6 @@ const Login = () => {
                 Get Started
                 <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
               </motion.button>
-
-              <p className="text-xs text-muted-foreground/70 text-center px-2 mt-4">
-                Sign in or create account with your email • No password required
-              </p>
             </motion.div>
           ) : (
             // Email form
@@ -95,7 +87,7 @@ const Login = () => {
             >
               <div className="space-y-2">
                 <label className="text-xs text-muted-foreground uppercase tracking-widest font-medium">
-                  Email address
+                  Email
                 </label>
                 <input
                   type="email"
@@ -107,10 +99,6 @@ const Login = () => {
                   disabled={loading}
                 />
               </div>
-
-              <p className="text-xs text-muted-foreground/70 px-2">
-                We'll send a magic link to your email. Click it to sign in.
-              </p>
 
               <button
                 type="submit"
@@ -144,12 +132,10 @@ const Login = () => {
           )}
         </div>
 
-        {/* Footer attribution - minimal */}
-        <div className="mt-16 text-center">
-          <p className="text-xs text-muted-foreground/80 tracking-wider">
-            Powered by{" "}
-            <span className="text-primary font-medium">Magic Link</span> &{" "}
-            <span className="text-primary font-medium">Flow Blockchain</span>
+        {/* Footer - minimal */}
+        <div className="mt-20 text-center">
+          <p className="text-[11px] text-muted-foreground/60 tracking-wide">
+            Powered by Flow Blockchain
           </p>
         </div>
       </motion.div>
