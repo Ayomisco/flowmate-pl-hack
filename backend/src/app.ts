@@ -19,7 +19,25 @@ const app = express();
 
 validateEnv();
 
-app.use(helmet());
+// Trust Vercel's proxy so rate-limiter sees real client IPs, not the load balancer
+app.set('trust proxy', 1);
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://*.magic.link", "https://auth.magic.link"],
+      frameSrc: ["'self'", "https://*.magic.link", "https://auth.magic.link"],
+      frameAncestors: ["'self'", "https://*.magic.link"],
+      connectSrc: ["'self'", "https://*.magic.link", "https://api.magic.link", "https://auth.magic.link", "https://*.neon.tech", "https://rest-testnet.onflow.org", "wss://*.magic.link"],
+      imgSrc: ["'self'", "data:", "https:"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://*.magic.link"],
+      fontSrc: ["'self'", "https:", "data:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Required so Magic iframe can load
+  crossOriginOpenerPolicy: false,   // Required for Magic popup flow
+}));
 app.use(corsMiddleware);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
