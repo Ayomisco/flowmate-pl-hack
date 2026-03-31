@@ -28,7 +28,7 @@ api.interceptors.response.use(
         // Ignore errors
       }
 
-      window.location.href = '/';
+      window.location.href = '/login';
     }
     return Promise.reject(err);
   }

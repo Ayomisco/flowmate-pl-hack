@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { getMagic } from '@/lib/magic';
 import api from '@/lib/api';
 
@@ -29,6 +29,20 @@ function loadUser(): AuthUser | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(loadUser);
+
+  // On mount: validate stored token against the backend to catch stale sessions
+  // (e.g. after a backend redeploy with new JWT_SECRET)
+  useEffect(() => {
+    if (!user) return;
+    api.get('/api/v1/auth/me').then(({ data }) => {
+      const fresh = data.data || data;
+      localStorage.setItem('flowmate_user', JSON.stringify(fresh));
+      setUser(fresh);
+    }).catch(() => {
+      // 401 interceptor in api.ts will clear localStorage and redirect to /login
+      setUser(null);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Passwordless Magic login:
