@@ -174,10 +174,10 @@ const Chat = () => {
   };
 
   return (
-    <div className="page-shell">
-      <div className="flex-1 flex flex-col app-container">
+    <div className="h-screen flex flex-col overflow-hidden bg-background">
+      <div className="flex-1 flex flex-col app-container overflow-hidden">
         <ChatHeader />
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
               <img src={flowmateLogo} alt="" width={48} height={48} className="opacity-40" />
@@ -256,7 +256,7 @@ const Chat = () => {
           </AnimatePresence>
         </div>
 
-        <div className="absolute bottom-16 left-0 right-0 z-40 flex justify-center px-4 py-3">
+        <div className="flex justify-center px-4 py-3 mb-16">
           <div className="w-full max-w-md lg:max-w-lg">
             <div className="card-secondary flex items-center gap-2">
               <input
@@ -277,8 +277,8 @@ const Chat = () => {
             </div>
           </div>
         </div>
-        <BottomNav />
       </div>
+      <BottomNav />
     </div>
   );
 };

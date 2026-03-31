@@ -14,6 +14,25 @@ export const ADMIN_ADDR = (() => {
 })();
 
 const ADMIN_KEY = env.flowAccountPrivateKey || '';
+
+// Log derived public key at startup so admin can verify it matches the on-chain key.
+// Expected on-chain pubkey for c26f3fa2883a46db:
+//   ee99c3d61d8621aa75031bc2c4b3760b03b27cae561caf7c1388bb8902e9d2cb
+//   84a5ff558c7f795f05b1c622422b6ac982884ba1e4ab065528633f4124aa1503
+if (ADMIN_KEY) {
+  (async () => {
+    try {
+      const { secp256k1 } = await import('@noble/curves/secp256k1.js');
+      const pub = secp256k1.getPublicKey(Buffer.from(ADMIN_KEY, 'hex'), false);
+      const pubHex = Buffer.from(pub.slice(1)).toString('hex');
+      logger.info('FLOW admin key loaded', { addr: ADMIN_ADDR, derivedPubKey: pubHex });
+    } catch (e) {
+      logger.error('Failed to derive pubkey from FLOW_ACCOUNT_PRIVATE_KEY', { err: (e as Error).message });
+    }
+  })();
+} else {
+  logger.warn('FLOW_ACCOUNT_PRIVATE_KEY not configured');
+}
 const ACCESS_NODE = 'https://rest-testnet.onflow.org';
 export const WELCOME_AMOUNT = 300;
 
