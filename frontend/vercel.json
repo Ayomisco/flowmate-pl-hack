@@ -5,10 +5,6 @@
   "framework": "vite",
   "cleanUrls": true,
   "trailingSlash": false,
-  "env": {
-    "VITE_API_URL": "@vite_api_url",
-    "VITE_MAGIC_PUBLISHABLE_KEY": "@vite_magic_publishable_key"
-  },
   "rewrites": [
     {
       "source": "/((?!api/).*)",
