@@ -51,9 +51,9 @@ export async function signSecp256k1(hexMessage: string, privateKeyHex: string = 
   // Flow uses SHA2_256 before signing
   const hash = createHash('sha256').update(msgBytes).digest();
   const privKey = Buffer.from(privateKeyHex, 'hex');
-  // sign() returns a Signature object — use toCompactHex() for the 64-byte r||s hex
+  // In @noble/curves v2.x, sign() returns Uint8Array (compact 64-byte r||s) directly
   const sig = secp256k1.sign(hash, privKey);
-  return sig.toCompactHex();
+  return Buffer.from(sig).toString('hex');
 }
 
 /**
