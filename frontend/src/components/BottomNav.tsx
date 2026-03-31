@@ -1,12 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { LayoutGrid, Bot, Settings, Clock, Zap } from "lucide-react";
+import { LayoutGrid, Bot, Settings, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 
 const tabs = [
   { path: "/dashboard", icon: LayoutGrid, label: "Home" },
   { path: "/chat", icon: Bot, label: "Agent" },
   { path: "/rules", icon: Zap, label: "Automate" },
-  { path: "/transactions", icon: Clock, label: "History" },
   { path: "/config", icon: Settings, label: "Config" },
 ];
 

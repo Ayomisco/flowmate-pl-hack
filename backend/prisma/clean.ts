@@ -34,9 +34,9 @@ async function cleanDatabase() {
     await prisma.whitelistedRecipient.deleteMany({});
     console.log('✓ Deleted WhitelistedRecipients');
 
-    // Note: Users are kept only if you want, otherwise uncomment below
-    // await prisma.user.deleteMany({});
-    // console.log('✓ Deleted Users');
+    // Delete Users
+    await prisma.user.deleteMany({});
+    console.log('✓ Deleted Users');
 
     console.log('\n✅ Database cleaned successfully!');
   } catch (error) {
