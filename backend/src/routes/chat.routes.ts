@@ -1,10 +1,11 @@
 import { Router, Response, RequestHandler } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { getAIService } from '../services/ai.service.js';
 import { cacheGet, cacheSet, cacheDel } from '../config/redis.js';
 import logger from '../config/logger.js';
-import { executeFlow, CONTRACT_ADDRESS } from '../config/flow.js';
+import { sendFlowFromAdmin } from '../services/flow-transfer.service.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -25,46 +26,10 @@ async function executeActionInternal(
     ]);
     if (!vault || vault.balance < amountNum) throw new Error('Insufficient balance');
 
-    // Submit to Flow blockchain
-    let txHash = '';
-    try {
-      const cadenceScript = `
-        import FungibleToken from 0x9a0766d93b6608b7
-        import FlowToken from 0x7e60df042a9c0868
-
-        transaction(amount: UFix64, to: Address) {
-          let sentVault: @FungibleToken.Vault
-
-          prepare(signer: AuthAccount) {
-            let vaultRef = signer.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-              ?? panic("Could not borrow reference to the owner's Vault!")
-
-            self.sentVault <- vaultRef.withdraw(amount: amount)
-          }
-
-          execute {
-            let recipient = getAccount(to)
-            let receiverRef = recipient.getCapability(/public/flowTokenReceiver)
-              .borrow<&{FungibleToken.Receiver}>()
-              ?? panic("Could not borrow receiver reference to the recipient's Vault")
-
-            receiverRef.deposit(from: <- self.sentVault)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-          arg(recipient, t.Address),
-        ]
-      );
-      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
-    } catch (flowErr) {
-      txHash = `chat:${Math.random().toString(16).slice(2)}`;
-      logger.warn('Flow send failed, using fallback', { error: (flowErr as Error).message });
-    }
+    // Submit to Flow blockchain using admin account (custodial)
+    const realTxId = await sendFlowFromAdmin(recipient, amountNum);
+    const txHash = realTxId || `internal:${randomBytes(16).toString('hex')}`;
+    const explorerUrl = realTxId ? `https://testnet.flowscan.io/tx/${realTxId}` : undefined;
 
     await prisma.$transaction([
       prisma.vault.update({ where: { id: vault.id }, data: { balance: { decrement: amountNum } } }),
@@ -79,9 +44,10 @@ async function executeActionInternal(
         toAddress: recipient,
         amount: amountNum,
         token: 'FLOW',
-        status: 'confirmed',
+        status: realTxId ? 'confirmed' : 'pending',
+        explorerUrl,
         metadata: note ? { note, source: 'chat' } : Prisma.JsonNull,
-        confirmedAt: new Date(),
+        confirmedAt: realTxId ? new Date() : undefined,
       },
     });
     return {};
@@ -98,43 +64,7 @@ async function executeActionInternal(
     if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
     if (!dest) throw new Error(`Vault ${toVault} not found`);
 
-    // Submit to Flow blockchain
-    let txHash = '';
-    try {
-      const cadenceScript = `
-        import VaultManager from ${CONTRACT_ADDRESS}
-
-        transaction(amount: UFix64, toVault: String) {
-          let vaults: &VaultManager.UserVaults
-
-          prepare(signer: AuthAccount) {
-            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-            }
-
-            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-              ?? panic("Could not borrow vaults")
-          }
-
-          execute {
-            self.vaults.transferBetweenVaults(from: "available", to: toVault, amount: amount)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-          arg(toVault, t.String),
-        ]
-      );
-      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
-    } catch (flowErr) {
-      txHash = `chat:${Math.random().toString(16).slice(2)}`;
-      logger.warn('Flow save failed, using fallback', { error: (flowErr as Error).message });
-    }
+    const txHash = `internal:${randomBytes(16).toString('hex')}`;
 
     await prisma.$transaction([
       prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
@@ -168,42 +98,7 @@ async function executeActionInternal(
     if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
     if (!staking) throw new Error('Staking vault not found');
 
-    // Submit to Flow blockchain
-    let txHash = '';
-    try {
-      const cadenceScript = `
-        import VaultManager from ${CONTRACT_ADDRESS}
-
-        transaction(amount: UFix64) {
-          let vaults: &VaultManager.UserVaults
-
-          prepare(signer: AuthAccount) {
-            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-            }
-
-            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-              ?? panic("Could not borrow vaults")
-          }
-
-          execute {
-            self.vaults.transferBetweenVaults(from: "available", to: "staking", amount: amount)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-        ]
-      );
-      txHash = result.transactionId || `chat:${Math.random().toString(16).slice(2)}`;
-    } catch (flowErr) {
-      txHash = `chat:${Math.random().toString(16).slice(2)}`;
-      logger.warn('Flow stake failed, using fallback', { error: (flowErr as Error).message });
-    }
+    const txHash = `internal:${randomBytes(16).toString('hex')}`;
 
     await prisma.$transaction([
       prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
@@ -215,7 +110,7 @@ async function executeActionInternal(
         txHash,
         type: 'stake',
         fromAddress: user?.flowAddress || '',
-        toAddress: 'flow-staking-contract',
+        toAddress: 'vault:staking',
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',

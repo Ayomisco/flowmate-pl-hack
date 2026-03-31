@@ -3,8 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import logger from '../config/logger.js';
-import { executeFlow, CONTRACT_ADDRESS } from '../config/flow.js';
-import * as fcl from '@onflow/fcl';
+import { sendFlowFromAdmin } from '../services/flow-transfer.service.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -14,8 +13,8 @@ function makeTxHash(): string {
   return `internal:${randomBytes(16).toString('hex')}`;
 }
 
-// Helper to generate explorer URL
 function getExplorerUrl(txHash: string): string {
+  if (txHash.startsWith('internal:')) return '';
   return `https://testnet.flowscan.io/tx/${txHash}`;
 }
 
@@ -83,62 +82,21 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Submit transaction to Flow blockchain
-    let txHash = '';
-    let explorerUrl = '';
-    try {
-      const cadenceScript = `
-        import FungibleToken from 0x9a0766d93b6608b7
-        import FlowToken from 0x7e60df042a9c0868
+    // Submit to Flow blockchain using admin account (custodial — admin holds funds on-chain)
+    const realTxId = await sendFlowFromAdmin(recipient, amountNum);
+    const txHash = realTxId || makeTxHash();
+    const explorerUrl = getExplorerUrl(txHash);
 
-        transaction(amount: UFix64, to: Address) {
-          let sentVault: @FungibleToken.Vault
-
-          prepare(signer: AuthAccount) {
-            let vaultRef = signer.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-              ?? panic("Could not borrow reference to the owner's Vault!")
-
-            self.sentVault <- vaultRef.withdraw(amount: amount)
-          }
-
-          execute {
-            let recipient = getAccount(to)
-            let receiverRef = recipient.getCapability(/public/flowTokenReceiver)
-              .borrow<&{FungibleToken.Receiver}>()
-              ?? panic("Could not borrow receiver reference to the recipient's Vault")
-
-            receiverRef.deposit(from: <- self.sentVault)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-          arg(recipient, t.Address),
-        ]
-      );
-
-      txHash = result.transactionId || makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-      logger.info('Send transaction submitted to Flow', { userId: req.userId, txHash, recipient, amount: amountNum });
-    } catch (flowErr) {
-      logger.warn('Flow transaction failed, using fallback', { error: (flowErr as Error).message });
-      txHash = makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
+    if (realTxId) {
+      logger.info('Send transaction confirmed on-chain', { userId: req.userId, txHash, recipient, amount: amountNum });
+    } else {
+      logger.warn('On-chain send failed, recording as internal', { userId: req.userId, recipient, amount: amountNum });
     }
 
-    // Update local database
+    // Update DB
     await prisma.$transaction([
-      prisma.vault.update({
-        where: { id: availableVault.id },
-        data: { balance: { decrement: amountNum } },
-      }),
-      prisma.user.update({
-        where: { id: req.userId! },
-        data: { dailySpent: { increment: amountNum } },
-      }),
+      prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
+      prisma.user.update({ where: { id: req.userId! }, data: { dailySpent: { increment: amountNum } } }),
     ]);
     const tx = await prisma.transaction.create({
       data: {
@@ -149,12 +107,12 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
         toAddress: recipient,
         amount: amountNum,
         token: 'FLOW',
-        status: 'confirmed',
+        status: realTxId ? 'confirmed' : 'pending',
+        explorerUrl: explorerUrl || undefined,
         metadata: note ? { note, explorerUrl } : { explorerUrl },
-        confirmedAt: new Date(),
+        confirmedAt: realTxId ? new Date() : undefined,
       },
     });
-    logger.info('Send transaction', { userId: req.userId, txHash, amount: amountNum });
     res.json({ success: true, data: { transaction: { ...tx, explorerUrl } } });
   } catch (err) {
     logger.error('Send failed', { err: (err as Error).message });
@@ -163,6 +121,7 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/v1/transactions/save
+// Vault-to-vault transfers are tracked in DB (custodial model — vaults are off-chain)
 router.post('/save', auth, async (req: AuthRequest, res: Response) => {
   const { amount, toVault = 'savings' } = req.body;
   if (!amount || parseFloat(amount) <= 0) {
@@ -190,50 +149,8 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Submit transaction to Flow blockchain
-    let txHash = '';
-    let explorerUrl = '';
-    try {
-      const cadenceScript = `
-        import VaultManager from ${CONTRACT_ADDRESS}
+    const txHash = makeTxHash();
 
-        transaction(amount: UFix64, toVault: String) {
-          let vaults: &VaultManager.UserVaults
-
-          prepare(signer: AuthAccount) {
-            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-            }
-
-            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-              ?? panic("Could not borrow vaults")
-          }
-
-          execute {
-            self.vaults.transferBetweenVaults(from: "available", to: toVault, amount: amount)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-          arg(toVault, t.String),
-        ]
-      );
-
-      txHash = result.transactionId || makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-      logger.info('Save transaction submitted to Flow', { userId: req.userId, txHash, toVault, amount: amountNum });
-    } catch (flowErr) {
-      logger.warn('Flow transaction failed, using fallback', { error: (flowErr as Error).message });
-      txHash = makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-    }
-
-    // Update local database
     await prisma.$transaction([
       prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
       prisma.vault.update({ where: { id: destVault.id }, data: { balance: { increment: amountNum } } }),
@@ -248,12 +165,12 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        metadata: { fromVault: 'available', toVault, explorerUrl },
+        metadata: { fromVault: 'available', toVault },
         confirmedAt: new Date(),
       },
     });
     logger.info('Save transaction', { userId: req.userId, toVault, amount: amountNum });
-    res.json({ success: true, data: { transaction: { ...tx, explorerUrl } } });
+    res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Save failed', { err: (err as Error).message });
     res.status(500).json({ success: false, error: 'Save failed' });
@@ -283,55 +200,12 @@ router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
       return;
     }
     if (from.balance < amountNum) {
-      res.status(400).json({ success: false, error: `Insufficient balance in ${fromVault} vault: ${from.balance} FLOW` });
+      res.status(400).json({ success: false, error: `Insufficient balance in ${fromVault}: ${from.balance} FLOW` });
       return;
     }
 
-    // Submit transaction to Flow blockchain
-    let txHash = '';
-    let explorerUrl = '';
-    try {
-      const cadenceScript = `
-        import VaultManager from ${CONTRACT_ADDRESS}
+    const txHash = makeTxHash();
 
-        transaction(amount: UFix64, from: String, to: String) {
-          let vaults: &VaultManager.UserVaults
-
-          prepare(signer: AuthAccount) {
-            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-            }
-
-            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-              ?? panic("Could not borrow vaults")
-          }
-
-          execute {
-            self.vaults.transferBetweenVaults(from: from, to: to, amount: amount)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-          arg(fromVault, t.String),
-          arg(toVault, t.String),
-        ]
-      );
-
-      txHash = result.transactionId || makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-      logger.info('Swap transaction submitted to Flow', { userId: req.userId, txHash, fromVault, toVault, amount: amountNum });
-    } catch (flowErr) {
-      logger.warn('Flow transaction failed, using fallback', { error: (flowErr as Error).message });
-      txHash = makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-    }
-
-    // Update local database
     await prisma.$transaction([
       prisma.vault.update({ where: { id: from.id }, data: { balance: { decrement: amountNum } } }),
       prisma.vault.update({ where: { id: to.id }, data: { balance: { increment: amountNum } } }),
@@ -346,12 +220,12 @@ router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        metadata: { fromVault, toVault, explorerUrl },
+        metadata: { fromVault, toVault },
         confirmedAt: new Date(),
       },
     });
     logger.info('Swap transaction', { userId: req.userId, fromVault, toVault, amount: amountNum });
-    res.json({ success: true, data: { transaction: { ...tx, explorerUrl } } });
+    res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Swap failed', { err: (err as Error).message });
     res.status(500).json({ success: false, error: 'Swap failed' });
@@ -381,49 +255,8 @@ router.post('/stake', auth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Submit transaction to Flow blockchain
-    let txHash = '';
-    let explorerUrl = '';
-    try {
-      const cadenceScript = `
-        import VaultManager from ${CONTRACT_ADDRESS}
+    const txHash = makeTxHash();
 
-        transaction(amount: UFix64) {
-          let vaults: &VaultManager.UserVaults
-
-          prepare(signer: AuthAccount) {
-            if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-              signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-              signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-            }
-
-            self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-              ?? panic("Could not borrow vaults")
-          }
-
-          execute {
-            self.vaults.transferBetweenVaults(from: "available", to: "staking", amount: amount)
-          }
-        }
-      `;
-
-      const result = await executeFlow(
-        cadenceScript,
-        (arg: any, t: any) => [
-          arg(amountNum.toFixed(8), t.UFix64),
-        ]
-      );
-
-      txHash = result.transactionId || makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-      logger.info('Stake transaction submitted to Flow', { userId: req.userId, txHash, amount: amountNum });
-    } catch (flowErr) {
-      logger.warn('Flow transaction failed, using fallback', { error: (flowErr as Error).message });
-      txHash = makeTxHash();
-      explorerUrl = getExplorerUrl(txHash);
-    }
-
-    // Update local database
     await prisma.$transaction([
       prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
       prisma.vault.update({ where: { id: stakingVault.id }, data: { balance: { increment: amountNum } } }),
@@ -434,16 +267,16 @@ router.post('/stake', auth, async (req: AuthRequest, res: Response) => {
         txHash,
         type: 'stake',
         fromAddress: user?.flowAddress || '',
-        toAddress: 'flow-staking-contract',
+        toAddress: 'vault:staking',
         amount: amountNum,
         token: 'FLOW',
         status: 'confirmed',
-        metadata: { validator: 'FlowMate Staking Pool', apy: '8.5%', explorerUrl },
+        metadata: { apy: '8.5%' },
         confirmedAt: new Date(),
       },
     });
     logger.info('Stake transaction', { userId: req.userId, amount: amountNum });
-    res.json({ success: true, data: { transaction: { ...tx, explorerUrl } } });
+    res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Stake failed', { err: (err as Error).message });
     res.status(500).json({ success: false, error: 'Staking failed' });

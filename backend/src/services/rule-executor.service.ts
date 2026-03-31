@@ -1,8 +1,9 @@
 import Queue from 'bull';
 import { PrismaClient } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { env } from '../config/env.js';
 import logger from '../config/logger.js';
-import { executeFlow, CONTRACT_ADDRESS } from '../config/flow.js';
+import { sendFlowFromAdmin } from './flow-transfer.service.js';
 
 const prisma = new PrismaClient();
 
@@ -98,7 +99,7 @@ async function executeRule(rule: any, userId: string): Promise<void> {
 }
 
 /**
- * Execute save rule
+ * Execute save rule — vault-to-vault transfer (DB only, custodial model)
  */
 async function executeSaveRule(
   userAddress: string,
@@ -106,39 +107,23 @@ async function executeSaveRule(
   toVault: string,
   userId: string,
 ): Promise<void> {
-  const cadenceScript = `
-    import VaultManager from ${CONTRACT_ADDRESS}
-
-    transaction(amount: UFix64, toVault: String) {
-      let vaults: &VaultManager.UserVaults
-
-      prepare(signer: AuthAccount) {
-        if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-          signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-          signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-        }
-
-        self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-          ?? panic("Could not borrow vaults")
-      }
-
-      execute {
-        self.vaults.transferBetweenVaults(from: "available", to: toVault, amount: amount)
-      }
-    }
-  `;
-
   try {
-    const result = await executeFlow(
-      cadenceScript,
-      (arg: any, t: any) => [
-        arg(amount.toFixed(8), t.UFix64),
-        arg(toVault, t.String),
-      ],
-    );
+    const [avail, dest] = await Promise.all([
+      prisma.vault.findFirst({ where: { userId, type: 'available' } }),
+      prisma.vault.findFirst({ where: { userId, type: toVault } }),
+    ]);
 
-    const txHash = result.transactionId || 'pending';
-    const txRecord = await prisma.transaction.create({
+    if (!avail || avail.balance < amount) throw new Error('Insufficient balance for automated save');
+    if (!dest) throw new Error(`Vault ${toVault} not found`);
+
+    const txHash = `internal:${randomBytes(16).toString('hex')}`;
+
+    await prisma.$transaction([
+      prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amount } } }),
+      prisma.vault.update({ where: { id: dest.id }, data: { balance: { increment: amount } } }),
+    ]);
+
+    await prisma.transaction.create({
       data: {
         userId,
         txHash,
@@ -147,12 +132,13 @@ async function executeSaveRule(
         toAddress: `vault:${toVault}`,
         amount,
         token: 'FLOW',
-        status: 'pending',
+        status: 'confirmed',
         metadata: { automated: true, ruleType: 'save' },
+        confirmedAt: new Date(),
       },
     });
 
-    logger.info('Automated save executed', { userId, amount, txHash });
+    logger.info('Automated save executed', { userId, amount, toVault });
   } catch (err) {
     logger.error('Save rule execution failed', { userId, error: (err as Error).message });
     throw err;
@@ -160,7 +146,7 @@ async function executeSaveRule(
 }
 
 /**
- * Execute send rule
+ * Execute send rule — sends FLOW from admin account to recipient (custodial)
  */
 async function executeSendRule(
   userAddress: string,
@@ -168,41 +154,16 @@ async function executeSendRule(
   recipient: string,
   userId: string,
 ): Promise<void> {
-  const cadenceScript = `
-    import FungibleToken from 0x9a0766d93b6608b7
-    import FlowToken from 0x7e60df042a9c0868
-
-    transaction(amount: UFix64, to: Address) {
-      let sentVault: @FungibleToken.Vault
-
-      prepare(signer: AuthAccount) {
-        let vaultRef = signer.borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-          ?? panic("Could not borrow reference to the owner's Vault!")
-
-        self.sentVault <- vaultRef.withdraw(amount: amount)
-      }
-
-      execute {
-        let recipient = getAccount(to)
-        let receiverRef = recipient.getCapability(/public/flowTokenReceiver)
-          .borrow<&{FungibleToken.Receiver}>()
-          ?? panic("Could not borrow receiver reference to the recipient's Vault")
-
-        receiverRef.deposit(from: <- self.sentVault)
-      }
-    }
-  `;
-
   try {
-    const result = await executeFlow(
-      cadenceScript,
-      (arg: any, t: any) => [
-        arg(amount.toFixed(8), t.UFix64),
-        arg(recipient, t.Address),
-      ],
-    );
+    const vault = await prisma.vault.findFirst({ where: { userId, type: 'available' } });
+    if (!vault || vault.balance < amount) throw new Error('Insufficient balance for automated send');
 
-    const txHash = result.transactionId || 'pending';
+    const realTxId = await sendFlowFromAdmin(recipient, amount);
+    const txHash = realTxId || `internal:${randomBytes(16).toString('hex')}`;
+    const explorerUrl = realTxId ? `https://testnet.flowscan.io/tx/${realTxId}` : undefined;
+
+    await prisma.vault.update({ where: { id: vault.id }, data: { balance: { decrement: amount } } });
+
     await prisma.transaction.create({
       data: {
         userId,
@@ -212,8 +173,10 @@ async function executeSendRule(
         toAddress: recipient,
         amount,
         token: 'FLOW',
-        status: 'pending',
+        status: realTxId ? 'confirmed' : 'pending',
+        explorerUrl,
         metadata: { automated: true, ruleType: 'send' },
+        confirmedAt: realTxId ? new Date() : undefined,
       },
     });
 
@@ -225,53 +188,41 @@ async function executeSendRule(
 }
 
 /**
- * Execute stake rule
+ * Execute stake rule — vault-to-staking transfer (DB only, custodial model)
  */
 async function executeStakeRule(userAddress: string, amount: number, userId: string): Promise<void> {
-  const cadenceScript = `
-    import VaultManager from ${CONTRACT_ADDRESS}
-
-    transaction(amount: UFix64) {
-      let vaults: &VaultManager.UserVaults
-
-      prepare(signer: AuthAccount) {
-        if signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults) == nil {
-          signer.save(<- VaultManager.createUserVaults(), to: /storage/flowmateVaults)
-          signer.link<&VaultManager.UserVaults>(/public/flowmateVaults, target: /storage/flowmateVaults)
-        }
-
-        self.vaults = signer.borrow<&VaultManager.UserVaults>(from: /storage/flowmateVaults)
-          ?? panic("Could not borrow vaults")
-      }
-
-      execute {
-        self.vaults.transferBetweenVaults(from: "available", to: "staking", amount: amount)
-      }
-    }
-  `;
-
   try {
-    const result = await executeFlow(
-      cadenceScript,
-      (arg: any, t: any) => [arg(amount.toFixed(8), t.UFix64)],
-    );
+    const [avail, staking] = await Promise.all([
+      prisma.vault.findFirst({ where: { userId, type: 'available' } }),
+      prisma.vault.findFirst({ where: { userId, type: 'staking' } }),
+    ]);
 
-    const txHash = result.transactionId || 'pending';
+    if (!avail || avail.balance < amount) throw new Error('Insufficient balance for automated stake');
+    if (!staking) throw new Error('Staking vault not found');
+
+    const txHash = `internal:${randomBytes(16).toString('hex')}`;
+
+    await prisma.$transaction([
+      prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amount } } }),
+      prisma.vault.update({ where: { id: staking.id }, data: { balance: { increment: amount } } }),
+    ]);
+
     await prisma.transaction.create({
       data: {
         userId,
         txHash,
         type: 'stake',
         fromAddress: userAddress,
-        toAddress: 'flow-staking-contract',
+        toAddress: 'vault:staking',
         amount,
         token: 'FLOW',
-        status: 'pending',
+        status: 'confirmed',
         metadata: { automated: true, ruleType: 'stake', apy: '8.5%' },
+        confirmedAt: new Date(),
       },
     });
 
-    logger.info('Automated stake executed', { userId, amount, txHash });
+    logger.info('Automated stake executed', { userId, amount });
   } catch (err) {
     logger.error('Stake rule execution failed', { userId, error: (err as Error).message });
     throw err;

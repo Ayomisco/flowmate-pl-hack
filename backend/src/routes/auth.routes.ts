@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import logger from '../config/logger.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { sendWelcomeFlow, WELCOME_AMOUNT } from '../services/flow-transfer.service.js';
+import { createFlowAccount, isValidFlowAddress } from '../services/flow-account.service.js';
 
 const auth = authenticateToken as unknown as RequestHandler;
 const router = Router();
@@ -16,8 +17,6 @@ const prisma = new PrismaClient();
 const magic = new Magic(env.magicSecretKey);
 
 // ─── POST /api/v1/auth/login ─────────────────────────────────────────────────
-// Frontend sends the Magic DID token in Authorization header or body.
-// We verify it, upsert the user, and return a signed JWT.
 router.post('/login', async (req: Request, res: Response) => {
   const didToken =
     req.headers['authorization']?.replace('Bearer ', '') ||
@@ -29,28 +28,46 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    // Throws if the token is invalid or expired
     magic.token.validate(didToken);
 
-    // Issuer is the unique Magic user identifier (did:ethr:0x...)
     const issuer = magic.token.getIssuer(didToken);
-
-    // Get user metadata from Magic — includes email and publicAddress
     const userMetadata = await magic.users.getMetadataByIssuer(issuer);
-
     const email = userMetadata.email ?? `${issuer.slice(-8)}@magic.flow`;
-    // Magic's publicAddress is the user's linked wallet (Flow address via @magic-ext/flow)
-    const flowAddress = (userMetadata as any).wallets?.[0]?.public_address
-      || userMetadata.publicAddress
-      || `0x${issuer.replace(/[^a-f0-9]/gi, '').slice(0, 16).padEnd(16, '0')}`;
 
-    // Upsert — create on first login, update metadata on subsequent logins
+    // Check if user already exists — we don't want to overwrite their Flow address
+    const existingUser = await prisma.user.findUnique({ where: { magicUserId: issuer } });
+    const isNewUser = !existingUser;
+
+    // Determine Flow address for new users
+    let flowAddress = (userMetadata as any).wallets?.[0]?.public_address
+      || userMetadata.publicAddress
+      || '';
+
+    if (isNewUser) {
+      if (!isValidFlowAddress(flowAddress)) {
+        // Magic didn't provide a real Cadence address — create one on-chain
+        logger.info('Creating new Flow Cadence account for user', { email });
+        const newAccount = await createFlowAccount();
+        if (newAccount) {
+          flowAddress = newAccount.address;
+          logger.info('Flow account created', { email, flowAddress });
+        } else {
+          // Fallback: derive a deterministic address from the issuer DID
+          // (not a real account, but unique per user — better than nothing)
+          flowAddress = `0x${issuer.replace(/[^a-f0-9]/gi, '').slice(0, 16).padEnd(16, '0')}`;
+          logger.warn('Using derived fallback Flow address', { email, flowAddress });
+        }
+      }
+    }
+
+    // Upsert — create on first login, update only email on subsequent logins
+    // We never overwrite flowAddress for existing users
     const user = await prisma.user.upsert({
       where: { magicUserId: issuer },
-      update: { email, flowAddress },
+      update: { email },
       create: {
         email,
-        passwordHash: '',   // Magic handles auth — no password needed
+        passwordHash: '',
         flowAddress,
         magicUserId: issuer,
         autonomyMode: 'manual',
@@ -60,9 +77,8 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // Seed default vaults + welcome bonus for brand-new users
     const vaultCount = await prisma.vault.count({ where: { userId: user.id } });
-    const isNewUser = vaultCount === 0;
 
-    if (isNewUser) {
+    if (vaultCount === 0) {
       await prisma.vault.createMany({
         data: [
           { userId: user.id, type: 'available', balance: WELCOME_AMOUNT },
@@ -72,7 +88,6 @@ router.post('/login', async (req: Request, res: Response) => {
         ],
       });
 
-      // Create a pending transaction record — explorerUrl will be set when on-chain tx confirms
       const pendingHash = `pending:${randomBytes(16).toString('hex')}`;
 
       await prisma.transaction.create({
@@ -81,7 +96,7 @@ router.post('/login', async (req: Request, res: Response) => {
           txHash: pendingHash,
           type: 'receive',
           fromAddress: env.flowAccountAddress || '0xc26f3fa2883a46db',
-          toAddress: flowAddress,
+          toAddress: user.flowAddress,
           amount: WELCOME_AMOUNT,
           token: 'FLOW',
           status: 'pending',
@@ -92,23 +107,20 @@ router.post('/login', async (req: Request, res: Response) => {
         },
       });
 
-      // Create welcome notification (persists in notification bell)
       await prisma.notification.create({
         data: {
           userId: user.id,
           type: 'payment_sent',
-          title: '🎉 Welcome bonus received!',
-          body: `${WELCOME_AMOUNT} FLOW has been sent to your wallet from the FlowMate treasury. Start saving, sending, and investing autonomously!`,
-          metadata: {
-            amount: WELCOME_AMOUNT,
-          } as Prisma.InputJsonValue,
+          title: 'Welcome bonus received!',
+          body: `${WELCOME_AMOUNT} FLOW has been sent to your wallet. Start saving, sending, and investing autonomously!`,
+          metadata: { amount: WELCOME_AMOUNT } as Prisma.InputJsonValue,
         },
       });
 
-      logger.info('New user seeded with welcome bonus', { userId: user.id, email, amount: WELCOME_AMOUNT });
+      logger.info('New user seeded', { userId: user.id, email, amount: WELCOME_AMOUNT });
 
-      // Fire-and-forget: try real on-chain transfer; update record with real txId if successful
-      sendWelcomeFlow(flowAddress).then(async (realTxId) => {
+      // Fire-and-forget: send real FLOW on-chain, update DB record when confirmed
+      sendWelcomeFlow(user.flowAddress).then(async (realTxId) => {
         if (realTxId) {
           const realExplorerUrl = `https://testnet.flowscan.io/tx/${realTxId}`;
           try {
@@ -126,20 +138,9 @@ router.post('/login', async (req: Request, res: Response) => {
                 } as Prisma.InputJsonValue,
               },
             });
-            await prisma.notification.updateMany({
-              where: { userId: user.id, type: 'payment_sent', metadata: { path: ['amount'], equals: WELCOME_AMOUNT } },
-              data: {
-                metadata: {
-                  amount: WELCOME_AMOUNT,
-                  explorerUrl: realExplorerUrl,
-                  txHash: realTxId,
-                  onChain: true,
-                } as Prisma.InputJsonValue,
-              },
-            });
             logger.info('Welcome bonus confirmed on-chain', { userId: user.id, realTxId });
           } catch (e) {
-            logger.warn('Failed to update welcome tx with real txId', { err: (e as Error).message });
+            logger.warn('Failed to update welcome tx record', { err: (e as Error).message });
           }
         }
       }).catch(() => { /* already logged in sendWelcomeFlow */ });
