@@ -14,18 +14,22 @@ const router = Router();
 const prisma = new PrismaClient();
 
 // Magic Admin SDK — validates DID tokens issued by Magic on the frontend
+if (!env.magicSecretKey) {
+  logger.error('MAGIC_SECRET_KEY is not set — Magic token validation will fail');
+}
 const magic = new Magic(env.magicSecretKey);
 
 // ─── POST /api/v1/auth/login ─────────────────────────────────────────────────
 router.post('/login', async (req: Request, res: Response) => {
-  const didToken =
-    req.headers['authorization']?.replace('Bearer ', '') ||
-    req.body.didToken;
+  const rawAuth = req.headers['authorization'] || '';
+  const didToken = (rawAuth.replace(/^Bearer\s+/i, '').trim()) || req.body.didToken;
 
   if (!didToken) {
     res.status(400).json({ success: false, error: 'DID token required' });
     return;
   }
+
+  logger.info('Magic login attempt', { tokenLen: didToken.length, tokenPrefix: didToken.slice(0, 20) });
 
   try {
     magic.token.validate(didToken);
