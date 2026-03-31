@@ -11,7 +11,7 @@ import logger from '../config/logger.js';
 const ADMIN_ADDR = env.flowAccountAddress || '0xc26f3fa2883a46db';
 const ADMIN_KEY = env.flowAccountPrivateKey || '';
 const ACCESS_NODE = 'https://rest-testnet.onflow.org';
-export const WELCOME_AMOUNT = 500;
+export const WELCOME_AMOUNT = 300;
 
 // Cadence 1.0 — transfers FLOW from admin to recipient
 const TRANSFER_CADENCE = `
