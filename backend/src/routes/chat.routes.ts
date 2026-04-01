@@ -68,6 +68,15 @@ async function executeActionInternal(
         confirmedAt: new Date(),
       },
     });
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: 'payment_sent',
+        title: `Sent ${amountNum} FLOW`,
+        body: `You sent ${amountNum} FLOW to ${recipient}. Transaction confirmed on-chain.`,
+        metadata: { amount: amountNum, recipient, txId: realTxId } as Prisma.InputJsonValue,
+      },
+    });
     return {};
   }
 
@@ -102,6 +111,15 @@ async function executeActionInternal(
         confirmedAt: new Date(),
       },
     });
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: 'action_executed',
+        title: `Saved ${amountNum} FLOW`,
+        body: `${amountNum} FLOW moved from available to ${toVault} vault.`,
+        metadata: { amount: amountNum, toVault } as Prisma.InputJsonValue,
+      },
+    });
     return {};
   }
 
@@ -134,6 +152,15 @@ async function executeActionInternal(
         status: 'confirmed',
         metadata: { apy: '8.5%', source: 'chat' } as Prisma.InputJsonValue,
         confirmedAt: new Date(),
+      },
+    });
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: 'action_executed',
+        title: `Staked ${amountNum} FLOW`,
+        body: `${amountNum} FLOW staked at 8.5% APY. Keep building your portfolio!`,
+        metadata: { amount: amountNum, apy: '8.5%' } as Prisma.InputJsonValue,
       },
     });
     return {};
@@ -268,7 +295,7 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
       where: { userId: req.userId },
       orderBy: { createdAt: 'asc' },
       take: 20,
-      select: { role: true, content: true },
+      select: { role: true, content: true, parsedIntent: true },
     });
 
     const aiService = getAIService();
@@ -381,7 +408,7 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
       where: { userId: req.userId },
       orderBy: { createdAt: 'asc' },
       take: 20,
-      select: { role: true, content: true },
+      select: { role: true, content: true, parsedIntent: true },
     });
 
     const aiService = getAIService();

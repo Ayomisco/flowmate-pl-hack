@@ -113,6 +113,15 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
         confirmedAt: realTxId ? new Date() : undefined,
       },
     });
+    await prisma.notification.create({
+      data: {
+        userId: req.userId!,
+        type: 'payment_sent',
+        title: `Sent ${amountNum} FLOW`,
+        body: `You sent ${amountNum} FLOW to ${recipient}.${realTxId ? ' Transaction confirmed on-chain.' : ''}`,
+        metadata: { amount: amountNum, recipient } as any,
+      },
+    });
     res.json({ success: true, data: { transaction: { ...tx, explorerUrl } } });
   } catch (err) {
     logger.error('Send failed', { err: (err as Error).message });
@@ -170,6 +179,15 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
       },
     });
     logger.info('Save transaction', { userId: req.userId, toVault, amount: amountNum });
+    await prisma.notification.create({
+      data: {
+        userId: req.userId!,
+        type: 'action_executed',
+        title: `Saved ${amountNum} FLOW`,
+        body: `${amountNum} FLOW moved from available to ${toVault} vault.`,
+        metadata: { amount: amountNum, toVault } as any,
+      },
+    });
     res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Save failed', { err: (err as Error).message });
@@ -225,6 +243,15 @@ router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
       },
     });
     logger.info('Swap transaction', { userId: req.userId, fromVault, toVault, amount: amountNum });
+    await prisma.notification.create({
+      data: {
+        userId: req.userId!,
+        type: 'action_executed',
+        title: `Swapped ${amountNum} FLOW`,
+        body: `${amountNum} FLOW moved from ${fromVault} to ${toVault} vault.`,
+        metadata: { amount: amountNum, fromVault, toVault } as any,
+      },
+    });
     res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Swap failed', { err: (err as Error).message });
@@ -276,6 +303,15 @@ router.post('/stake', auth, async (req: AuthRequest, res: Response) => {
       },
     });
     logger.info('Stake transaction', { userId: req.userId, amount: amountNum });
+    await prisma.notification.create({
+      data: {
+        userId: req.userId!,
+        type: 'action_executed',
+        title: `Staked ${amountNum} FLOW`,
+        body: `${amountNum} FLOW staked at 8.5% APY. Keep building your portfolio!`,
+        metadata: { amount: amountNum, apy: '8.5%' } as any,
+      },
+    });
     res.json({ success: true, data: { transaction: tx } });
   } catch (err) {
     logger.error('Stake failed', { err: (err as Error).message });
