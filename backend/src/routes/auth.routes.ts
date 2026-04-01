@@ -146,6 +146,13 @@ router.post('/login', async (req: Request, res: Response) => {
           } catch (e) {
             logger.warn('Failed to update welcome tx record', { err: (e as Error).message });
           }
+        } else {
+          // On-chain transfer failed — mark as failed
+          await prisma.transaction.updateMany({
+            where: { userId: user.id, txHash: pendingHash },
+            data: { status: 'failed' },
+          }).catch(() => {});
+          logger.warn('Welcome bonus on-chain transfer failed', { userId: user.id });
         }
       }).catch(() => { /* already logged in sendWelcomeFlow */ });
     }

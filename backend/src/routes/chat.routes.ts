@@ -28,8 +28,26 @@ async function executeActionInternal(
 
     // Submit to Flow blockchain using admin account (custodial)
     const realTxId = await sendFlowFromAdmin(recipient, amountNum);
-    const txHash = realTxId || `internal:${randomBytes(16).toString('hex')}`;
-    const explorerUrl = realTxId ? `https://testnet.flowscan.io/tx/${realTxId}` : undefined;
+
+    if (!realTxId) {
+      // On-chain transfer failed — do NOT deduct vault balance
+      await prisma.transaction.create({
+        data: {
+          userId,
+          txHash: `failed:${randomBytes(16).toString('hex')}`,
+          type: 'send',
+          fromAddress: user?.flowAddress || '',
+          toAddress: recipient,
+          amount: amountNum,
+          token: 'FLOW',
+          status: 'failed',
+          metadata: note ? { note, source: 'chat', error: 'on-chain transfer failed' } : { source: 'chat', error: 'on-chain transfer failed' } as Prisma.InputJsonValue,
+        },
+      });
+      throw new Error('On-chain transfer failed. Your balance was not affected.');
+    }
+
+    const explorerUrl = `https://testnet.flowscan.io/tx/${realTxId}`;
 
     await prisma.$transaction([
       prisma.vault.update({ where: { id: vault.id }, data: { balance: { decrement: amountNum } } }),
@@ -38,16 +56,16 @@ async function executeActionInternal(
     await prisma.transaction.create({
       data: {
         userId,
-        txHash,
+        txHash: realTxId,
         type: 'send',
         fromAddress: user?.flowAddress || '',
         toAddress: recipient,
         amount: amountNum,
         token: 'FLOW',
-        status: realTxId ? 'confirmed' : 'pending',
+        status: 'confirmed',
         explorerUrl,
         metadata: note ? { note, source: 'chat' } : Prisma.JsonNull,
-        confirmedAt: realTxId ? new Date() : undefined,
+        confirmedAt: new Date(),
       },
     });
     return {};
@@ -244,8 +262,17 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
     await prisma.chatMessage.create({
       data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
     });
+
+    // Fetch recent conversation history for AI context
+    const recentMessages = await prisma.chatMessage.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      select: { role: true, content: true },
+    });
+
     const aiService = getAIService();
-    const aiResponse = await aiService.process(message, context);
+    const aiResponse = await aiService.process(message, context, recentMessages);
     const executionPayload = buildExecutionPayload(aiResponse.intent);
 
     // Autopilot: auto-execute if user is in autopilot mode and there is an action to take
@@ -349,8 +376,16 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
       data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
     });
 
+    // Fetch recent conversation history for AI context
+    const recentMessages = await prisma.chatMessage.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      select: { role: true, content: true },
+    });
+
     const aiService = getAIService();
-    const aiResponse = await aiService.process(message, context);
+    const aiResponse = await aiService.process(message, context, recentMessages);
     const executionPayload = buildExecutionPayload(aiResponse.intent);
 
     // Autopilot

@@ -70,7 +70,7 @@ export async function signSecp256k1(hexMessage: string, privateKeyHex: string = 
   // Flow uses SHA2_256 before signing
   const hash = createHash('sha256').update(msgBytes).digest();
   const privKey = Buffer.from(privateKeyHex, 'hex');
-  // In @noble/curves v2.x, sign() returns Uint8Array (compact 64-byte r||s) directly
+  // @noble/curves v2 sign() returns a Uint8Array (64-byte compact r||s)
   const sig = secp256k1.sign(hash, privKey);
   return Buffer.from(sig).toString('hex');
 }
@@ -126,7 +126,17 @@ export async function sendFlowFromAdmin(toAddress: string, amount: number): Prom
       limit: 1000,
     });
 
-    logger.info('FLOW transfer submitted on-chain', { txId, to, amount });
+    logger.info('FLOW transfer submitted, waiting for seal…', { txId, to, amount });
+
+    // Wait for seal and verify success
+    const result = await (fcl as any).tx(txId).onceSealed();
+    if (result.statusCode !== 0) {
+      const errMsg = result.errorMessage || 'Transaction execution failed';
+      logger.error('FLOW transfer sealed but FAILED', { txId, statusCode: result.statusCode, errMsg });
+      return null;
+    }
+
+    logger.info('FLOW transfer confirmed on-chain', { txId, to, amount });
     return txId as string;
   } catch (err) {
     logger.warn('On-chain FLOW transfer failed', {

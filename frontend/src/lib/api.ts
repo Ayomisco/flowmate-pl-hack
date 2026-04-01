@@ -7,6 +7,8 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  // Skip if Authorization was explicitly set (e.g. Magic DID token during login)
+  if (config.headers.Authorization) return config;
   const token = localStorage.getItem('flowmate_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
