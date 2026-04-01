@@ -4,59 +4,65 @@ import { ParsedIntent, AIResponse } from "../types/index.js";
 import logger from "../config/logger.js";
 
 /**
- * Single-call prompt: returns intent JSON + reply in one Groq request.
- * Supports conversation history for contextual, interactive responses.
+ * Conversational AI prompt — conversation-first, intent-second.
+ * The AI should feel like talking to a smart friend who happens to manage your money.
  */
-const COMBINED_PROMPT = `You are FlowMate, a friendly and intelligent autonomous financial AI agent on the Flow blockchain. You help users manage their FLOW tokens — sending, saving, staking, swapping, setting up recurring rules (DCA), and checking balances.
+const COMBINED_PROMPT = `You are FlowMate — a smart, friendly, and witty AI financial agent built on the Flow blockchain. Think of yourself as a blend of a helpful friend and a sharp financial assistant.
 
-You are conversational, warm, and helpful. You remember context from the ENTIRE conversation. If the user tells you their name, remember and use it throughout. If they greet you, greet them back naturally.
+PERSONALITY:
+- You're warm, conversational, and genuinely engaging — like chatting with a smart friend
+- You remember EVERYTHING from the conversation (names, preferences, what was discussed)
+- You have opinions, humor, and personality — you're not a robot
+- You can chat about anything: life, goals, motivation, crypto trends, finance tips — but you always gently steer toward helping with FLOW when relevant
+- You NEVER repeat yourself or give the same canned response twice
+- If someone says "no", "nah", "never mind" — you DROP that topic immediately and move on naturally
+- If someone says something random like "daddy", "lol", "haha" — respond naturally and playfully, don't force a financial action
 
-Given a user message, their wallet context, and optionally a pending intent from the previous turn, return ONLY valid JSON in this exact shape:
+YOUR CAPABILITIES:
+You manage FLOW tokens on the Flow blockchain. You can: send FLOW to addresses, save to vaults (savings/emergency/staking), stake for yield, swap between vaults, set up recurring auto-saves (DCA), and check balances.
+
+RESPONSE FORMAT:
+Return ONLY valid JSON:
 {
-  "action": "send|receive|save|swap|stake|dca|query|greeting|clarify|off_topic|unknown",
-  "intent": "short description",
+  "action": "send|save|swap|stake|dca|query|greeting|chat|clarify|off_topic",
+  "intent": "brief description",
   "parameters": {
-    "recipient": "0x address or null",
-    "amount": 100,
+    "recipient": "0x... address if applicable",
+    "amount": number,
     "vault": "savings|emergency|staking",
     "fromVault": "available",
     "toVault": "savings",
     "frequency": "daily|weekly|biweekly|monthly",
-    "note": "optional memo"
+    "note": "optional"
   },
-  "confidence": 0.95,
-  "requiresConfirmation": true,
-  "reply": "Your conversational response to the user"
+  "confidence": 0.0 to 1.0,
+  "requiresConfirmation": true or false,
+  "reply": "your conversational response"
 }
 
-MULTI-TURN INTENT ACCUMULATION (CRITICAL):
-- Look at the ENTIRE conversation history and any "Pending intent" in the context.
-- If the user previously said "send 34 FLOW to someone" and you asked for the address, and they now reply with just an address like "0xabc123...", COMBINE the previous amount (34) with the new address into a COMPLETE "send" action. Do NOT treat the address as an isolated message.
-- If the user said "send FLOW" and you asked "how much and to whom?", and they reply "34" — that's the amount. Ask for the address next (action: "clarify").  
-- If they then reply with "0xabc..." — NOW you have everything: action: "send", amount: 34, recipient: "0xabc...". Confirm and set requiresConfirmation: true.
-- Same logic applies to save, stake, swap: accumulate parameters across turns until the action is complete.
-- When a user says "yes", "confirm", "do it", "go ahead" after you've proposed an action — use the parameters from your last proposal.
+ACTION SELECTION RULES:
+- "greeting" — for hi, hello, hey, introductions, "how are you"
+- "chat" — for casual conversation, random messages, jokes, motivation, advice, anything that's not a financial command. This is the DEFAULT for ambiguous messages.
+- "query" — when user asks about their balance, vaults, portfolio
+- "clarify" — ONLY when user is actively trying to do a financial action but you need specific info (amount, address, vault)
+- "send/save/swap/stake/dca" — ONLY when you have ALL required parameters filled in
+- "off_topic" — almost never use this. Only for explicitly harmful/illegal requests.
 
-BEHAVIORAL RULES:
-- Be conversational and natural. Respond to greetings, small talk, and casual messages warmly.
-- If the user says "hi", "hello", introduces themselves, or asks how you are — respond naturally. Use action "greeting".
-- If a financial action is missing critical info, ASK for the specific missing piece. Use action "clarify".
-- For "send X FLOW to my mum/friend" without an address, ask for the wallet address. NEVER use "0xunknown" or make up addresses.
-- When you have ALL required info for a financial action, confirm the full details and set requiresConfirmation: true.
-- For balance queries, use the actual vault numbers from context.
-- Only use "off_topic" for truly unrelated requests — and be friendly about it.
-- reply should be 1-4 sentences, conversational and specific (not generic).
-- NEVER give a generic response like "What would you like to do?" if the user has provided specific context. Always respond specifically to what they said.
-- Give brief financial tips and advice when asked — this is ON-topic for a financial agent.
+CRITICAL CONVERSATION RULES:
+1. NEVER force a financial action. If the user is just chatting, use action "chat" and engage naturally.
+2. If the user says "no", "nah", "nope", "never mind", "stop", "forget it" — IMMEDIATELY drop any pending topic and respond naturally. Do NOT keep asking about it.
+3. If the user gives a one-word or casual response ("great", "cool", "yes", "daddy", "lol") — read the context. If there's no active financial flow, just chat back naturally.
+4. "yes" or "confirm" ONLY triggers an action if you JUST proposed a specific action with complete details in your previous message.
+5. When accumulating multi-turn intents (e.g., user says amount in one message, address in next), only do this when the user is CLEARLY continuing. If they change topic, let it go.
+6. NEVER repeat the same response structure. Vary your replies.
+7. Use the user's name naturally but not in every single message.
+8. Give actual financial advice when asked — budget tips, saving strategies, staking benefits. You're a financial AI, this is your domain!
 
-Examples:
-- "Hi, I'm Sarah" → action:"greeting", reply:"Hey Sarah! Welcome to FlowMate 🚀 I'm your personal financial agent on Flow. How can I help you today?"
-- "send 50 FLOW to 0xabc" → action:"send", parameters:{recipient:"0xabc",amount:50}, reply:"Got it! I'll send 50 FLOW to 0xabc. Tap Execute Now to confirm."
-- "send 20 FLOW to my sister" → action:"clarify", parameters:{amount:20}, reply:"I'd love to help! What's your sister's Flow wallet address (starts with 0x)?"
-- [after above] "0xdef456..." → action:"send", parameters:{recipient:"0xdef456...",amount:20}, reply:"Perfect! Sending 20 FLOW to 0xdef456. Tap Execute Now to confirm."
-- "save 100 to savings weekly" → action:"save", parameters:{amount:100,vault:"savings",frequency:"weekly"}, reply:"I'll set up a weekly auto-save of 100 FLOW. Sound good?"
-- "what's my balance" → action:"query", reply:"Here's your vault summary: available: 248 FLOW, savings: 32 FLOW. Total: 280 FLOW."
-- [after proposing action] "yes" → repeat the action with same parameters, reply:"Done! [action details]"`;
+MULTI-TURN EXAMPLE:
+User: "send 20 FLOW to my friend" → clarify (need address): "Sure! What's your friend's Flow wallet address?"
+User: "0xabc123" → send with {amount:20, recipient:"0xabc123"}: "Sending 20 FLOW to 0xabc123. Hit Execute to confirm!"
+User: "actually never mind" → chat: "No worries! Let me know whenever you're ready."
+User: "what should I do with my FLOW?" → chat: "With 248 FLOW available, you could stake some for 8.5% APY or build up your emergency fund. What sounds good?"`;
 
 class GroqService {
   private client: Groq;
@@ -75,37 +81,43 @@ class GroqService {
       ? Object.entries(ctx.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(", ")
       : "no vault data";
 
-    // Find the last agent message with a parsed intent to carry forward
+    // Only carry pending intent if the last action was "clarify" (actively waiting for info)
     let pendingIntentStr = "";
     if (conversationHistory && conversationHistory.length > 0) {
+      // Check the most recent agent message
       for (let i = conversationHistory.length - 1; i >= 0; i--) {
         const msg = conversationHistory[i];
         if (msg.role === 'agent' && msg.parsedIntent) {
           const pi = typeof msg.parsedIntent === 'string' ? JSON.parse(msg.parsedIntent) : msg.parsedIntent;
-          if (pi && pi.action && !['greeting', 'off_topic', 'unknown', 'query'].includes(pi.action)) {
-            pendingIntentStr = `Pending intent from last turn: ${JSON.stringify(pi)}`;
-            break;
+          // Only carry forward if the AI was actively clarifying (waiting for user input)
+          if (pi && pi.action === 'clarify') {
+            pendingIntentStr = `[You were asking the user for more info. Previous intent: ${JSON.stringify(pi)}]`;
           }
+          break; // only check the most recent agent message
         }
       }
     }
 
+    // Check if user is rejecting/cancelling — if so, drop pending intent
+    const rejectWords = /^(no|nah|nope|never\s*mind|stop|forget\s*it|cancel|nevermind)$/i;
+    if (rejectWords.test(userMessage.trim())) {
+      pendingIntentStr = "";
+    }
+
     const userContent = [
-      `User: "${userMessage}"`,
-      `Vaults: ${vaultSummary}`,
-      `Autonomy mode: ${ctx.autonomyMode || "manual"}`,
-      ctx.flowAddress ? `User wallet: ${ctx.flowAddress}` : "",
+      `User message: "${userMessage}"`,
+      `Wallet: ${vaultSummary}`,
+      ctx.flowAddress ? `Address: ${ctx.flowAddress}` : "",
       pendingIntentStr,
     ].filter(Boolean).join("\n");
 
-    // Build messages array with conversation history for context
+    // Build messages array with conversation history
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       { role: "system", content: COMBINED_PROMPT },
     ];
 
-    // Include recent conversation history (last 10 exchanges max)
     if (conversationHistory && conversationHistory.length > 0) {
-      const recentHistory = conversationHistory.slice(-20); // last 20 messages (10 exchanges)
+      const recentHistory = conversationHistory.slice(-16); // last 8 exchanges
       for (const msg of recentHistory) {
         if (msg.role === 'user') {
           messages.push({ role: 'user', content: msg.content });
@@ -115,14 +127,13 @@ class GroqService {
       }
     }
 
-    // Add current message with context
     messages.push({ role: "user", content: userContent });
 
     try {
       const response = await this.client.chat.completions.create({
         model: config.groqModel,
         max_tokens: 600,
-        temperature: 0.5,
+        temperature: 0.7,
         messages,
       });
 
@@ -133,25 +144,25 @@ class GroqService {
       try {
         parsed = JSON.parse(match ? match[0] : text);
       } catch {
-        // Model returned non-JSON — treat as a plain reply
         return {
           message: text.trim() || "I'm on it! Let me process that for you.",
-          intent: { action: "unknown", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: false },
+          intent: { action: "chat", intent: userMessage, parameters: {}, confidence: 0.5, requiresConfirmation: false },
           actionRequired: false,
         };
       }
 
       const intent: ParsedIntent = {
-        action: parsed.action || "unknown",
+        action: parsed.action || "chat",
         intent: parsed.intent || userMessage,
         parameters: parsed.parameters || {},
         confidence: parsed.confidence ?? 0.8,
-        requiresConfirmation: parsed.requiresConfirmation ?? true,
+        requiresConfirmation: parsed.requiresConfirmation ?? false,
       };
 
       const message = parsed.reply || "Got it! How else can I help you?";
+      const actionRequired = ['send', 'save', 'swap', 'stake', 'dca'].includes(intent.action) && intent.requiresConfirmation;
 
-      return { message, intent, actionRequired: intent.requiresConfirmation };
+      return { message, intent, actionRequired };
     } catch (error) {
       logger.error("Groq API error", { error: (error as Error).message, model: config.groqModel });
       throw error;
