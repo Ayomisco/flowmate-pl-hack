@@ -69,12 +69,12 @@ router.patch('/:id/contribute', auth, async (req: AuthRequest, res: Response) =>
       prisma.vault.findFirst({ where: { userId: req.userId, type: 'available' } }),
     ]);
     if (!goal) { res.status(404).json({ success: false, error: 'Goal not found' }); return; }
-    if (!availableVault || availableVault.balance < amountNum) {
+    if (!availableVault || Number(availableVault.balance) < amountNum) {
       res.status(400).json({ success: false, error: 'Insufficient available balance' }); return;
     }
 
-    const newAmount = goal.currentAmount + amountNum;
-    const newStatus = newAmount >= goal.targetAmount ? 'achieved' : 'active';
+    const newAmount = Number(goal.currentAmount) + amountNum;
+    const newStatus = newAmount >= Number(goal.targetAmount) ? 'achieved' : 'active';
 
     await prisma.$transaction([
       prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),

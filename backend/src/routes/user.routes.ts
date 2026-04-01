@@ -35,13 +35,13 @@ router.get('/me', auth, async (req: AuthRequest, res: Response) => {
 
 // PUT /api/v1/users/me
 router.put('/me', auth, async (req: AuthRequest, res: Response) => {
-  const { email, dailyLimit } = req.body;
+  const { email } = req.body;
   try {
     const updated = await prisma.user.update({
       where: { id: req.userId },
       data: {
         ...(email && { email }),
-        ...(dailyLimit !== undefined && { dailyLimit: parseFloat(dailyLimit) }),
+        // dailyLimit is not user-editable — admin only
       },
       select: { id: true, email: true, flowAddress: true, autonomyMode: true, dailyLimit: true },
     });

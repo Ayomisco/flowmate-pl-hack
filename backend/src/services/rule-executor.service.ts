@@ -113,7 +113,7 @@ async function executeSaveRule(
       prisma.vault.findFirst({ where: { userId, type: toVault } }),
     ]);
 
-    if (!avail || avail.balance < amount) throw new Error('Insufficient balance for automated save');
+    if (!avail || Number(avail.balance) < amount) throw new Error('Insufficient balance for automated save');
     if (!dest) throw new Error(`Vault ${toVault} not found`);
 
     const txHash = `internal:${randomBytes(16).toString('hex')}`;
@@ -156,7 +156,7 @@ async function executeSendRule(
 ): Promise<void> {
   try {
     const vault = await prisma.vault.findFirst({ where: { userId, type: 'available' } });
-    if (!vault || vault.balance < amount) throw new Error('Insufficient balance for automated send');
+    if (!vault || Number(vault.balance) < amount) throw new Error('Insufficient balance for automated send');
 
     const realTxId = await sendFlowFromAdmin(recipient, amount);
     const txHash = realTxId || `internal:${randomBytes(16).toString('hex')}`;
@@ -197,7 +197,7 @@ async function executeStakeRule(userAddress: string, amount: number, userId: str
       prisma.vault.findFirst({ where: { userId, type: 'staking' } }),
     ]);
 
-    if (!avail || avail.balance < amount) throw new Error('Insufficient balance for automated stake');
+    if (!avail || Number(avail.balance) < amount) throw new Error('Insufficient balance for automated stake');
     if (!staking) throw new Error('Staking vault not found');
 
     const txHash = `internal:${randomBytes(16).toString('hex')}`;

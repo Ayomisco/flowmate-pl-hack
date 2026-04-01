@@ -39,8 +39,16 @@ app.use(helmet({
   crossOriginOpenerPolicy: false,   // Required for Magic popup flow
 }));
 app.use(corsMiddleware);
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
+
+// Convert Prisma Decimal objects to numbers in JSON responses
+app.set('json replacer', (_key: string, value: any) => {
+  if (value !== null && typeof value === 'object' && typeof value.toNumber === 'function' && 'd' in value && 'e' in value && 's' in value) {
+    return value.toNumber();
+  }
+  return value;
+});
 app.use('/api/', apiLimiter);
 
 // Health

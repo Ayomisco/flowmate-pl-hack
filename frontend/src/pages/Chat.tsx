@@ -35,7 +35,14 @@ const Chat = () => {
   const [sending, setSending] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottom = useRef(true);
   const queryClient = useQueryClient();
+
+  const handleScroll = () => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    isAtBottom.current = scrollHeight - scrollTop - clientHeight < 60;
+  };
 
   const { data: historyData } = useQuery({
     queryKey: ["chatHistory"],
@@ -57,7 +64,9 @@ const Chat = () => {
   }, [historyData]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (isAtBottom.current) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
   }, [messages]);
 
   const executeAction = async (msgId: string, payload: ExecutionPayload) => {
@@ -81,6 +90,7 @@ const Chat = () => {
 
   const send = async () => {
     if (!input.trim() || sending) return;
+    isAtBottom.current = true;
     const userMsg: Message = { id: Date.now().toString(), role: "user", content: input, time: now() };
     setMessages(prev => [...prev, userMsg]);
     const currentInput = input;
@@ -177,7 +187,7 @@ const Chat = () => {
     <div className="h-screen flex flex-col overflow-hidden bg-background">
       <div className="flex-1 flex flex-col app-container overflow-hidden">
         <ChatHeader />
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
               <img src={flowmateLogo} alt="" width={48} height={48} className="opacity-40" />
@@ -211,7 +221,10 @@ const Chat = () => {
                         </div>
                       ) : (
                         <>
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <ReactMarkdown
+                            allowedElements={['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'a', 'blockquote', 'span']}
+                            unwrapDisallowed
+                          >{msg.content}</ReactMarkdown>
                           {msg.streaming && (
                             <span className="inline-block w-1.5 h-4 bg-primary/70 ml-0.5 animate-pulse rounded-sm align-text-bottom" />
                           )}

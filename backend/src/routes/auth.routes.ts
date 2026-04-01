@@ -79,11 +79,11 @@ router.post('/login', async (req: Request, res: Response) => {
       },
     });
 
-    // Seed default vaults + welcome bonus for brand-new users
-    const vaultCount = await prisma.vault.count({ where: { userId: user.id } });
-
-    if (vaultCount === 0) {
-      await prisma.vault.createMany({
+    // Seed default vaults + welcome bonus — serializable transaction prevents duplicate vaults
+    const vaultsCreated = await prisma.$transaction(async (tx) => {
+      const count = await tx.vault.count({ where: { userId: user.id } });
+      if (count > 0) return false;
+      await tx.vault.createMany({
         data: [
           { userId: user.id, type: 'available', balance: WELCOME_AMOUNT },
           { userId: user.id, type: 'savings', balance: 0 },
@@ -91,6 +91,10 @@ router.post('/login', async (req: Request, res: Response) => {
           { userId: user.id, type: 'staking', balance: 0 },
         ],
       });
+      return true;
+    }, { isolationLevel: 'Serializable' });
+
+    if (vaultsCreated) {
 
       const pendingHash = `pending:${randomBytes(16).toString('hex')}`;
 

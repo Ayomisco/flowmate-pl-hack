@@ -40,7 +40,7 @@ router.post('/transfer', auth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    if (fromVault.balance < parseFloat(amount)) {
+    if (Number(fromVault.balance) < parseFloat(amount)) {
       res.status(400).json({ success: false, error: 'Insufficient balance' });
       return;
     }

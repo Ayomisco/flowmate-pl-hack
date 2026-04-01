@@ -70,8 +70,9 @@ export async function signSecp256k1(hexMessage: string, privateKeyHex: string = 
   // Flow uses SHA2_256 before signing
   const hash = createHash('sha256').update(msgBytes).digest();
   const privKey = Buffer.from(privateKeyHex, 'hex');
-  // @noble/curves v2 sign() returns a Uint8Array (64-byte compact r||s)
-  const sig = secp256k1.sign(hash, privKey);
+  // @noble/curves v2 sign() hashes with SHA256 by default — pass prehash:false
+  // since we already hashed above (Flow requires SHA2_256).
+  const sig = secp256k1.sign(hash, privKey, { prehash: false });
   return Buffer.from(sig).toString('hex');
 }
 

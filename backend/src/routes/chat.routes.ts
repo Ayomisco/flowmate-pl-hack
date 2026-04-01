@@ -24,13 +24,27 @@ async function executeActionInternal(
       prisma.user.findUnique({ where: { id: userId }, select: { flowAddress: true, dailyLimit: true, dailySpent: true } }),
       prisma.vault.findFirst({ where: { userId, type: 'available' } }),
     ]);
-    if (!vault || vault.balance < amountNum) throw new Error('Insufficient balance');
+    if (!vault) throw new Error('Available vault not found');
+
+    // Atomic balance deduction — prevents double-spend
+    const deducted = await prisma.vault.updateMany({
+      where: { id: vault.id, balance: { gte: amountNum } },
+      data: { balance: { decrement: amountNum } },
+    });
+    if (deducted.count === 0) throw new Error('Insufficient balance');
 
     // Submit to Flow blockchain using admin account (custodial)
-    const realTxId = await sendFlowFromAdmin(recipient, amountNum);
+    let realTxId: string | null = null;
+    try {
+      realTxId = await sendFlowFromAdmin(recipient, amountNum);
+    } catch (e) {
+      await prisma.vault.update({ where: { id: vault.id }, data: { balance: { increment: amountNum } } });
+      throw e;
+    }
 
     if (!realTxId) {
-      // On-chain transfer failed — do NOT deduct vault balance
+      // On-chain transfer failed — restore balance
+      await prisma.vault.update({ where: { id: vault.id }, data: { balance: { increment: amountNum } } });
       await prisma.transaction.create({
         data: {
           userId,
@@ -49,10 +63,7 @@ async function executeActionInternal(
 
     const explorerUrl = `https://testnet.flowscan.io/tx/${realTxId}`;
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: vault.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.user.update({ where: { id: userId }, data: { dailySpent: { increment: amountNum } } }),
-    ]);
+    await prisma.user.update({ where: { id: userId }, data: { dailySpent: { increment: amountNum } } });
     await prisma.transaction.create({
       data: {
         userId,
@@ -88,15 +99,23 @@ async function executeActionInternal(
       prisma.vault.findFirst({ where: { userId, type: 'available' } }),
       prisma.vault.findFirst({ where: { userId, type: toVault } }),
     ]);
-    if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
+    if (!avail) throw new Error('Available vault not found');
     if (!dest) throw new Error(`Vault ${toVault} not found`);
 
     const txHash = `internal:${randomBytes(16).toString('hex')}`;
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.vault.update({ where: { id: dest.id }, data: { balance: { increment: amountNum } } }),
-    ]);
+    // Atomic balance transfer — prevents double-spend
+    let transferred = false;
+    await prisma.$transaction(async (tx) => {
+      const d = await tx.vault.updateMany({
+        where: { id: avail.id, balance: { gte: amountNum } },
+        data: { balance: { decrement: amountNum } },
+      });
+      if (d.count === 0) return;
+      await tx.vault.update({ where: { id: dest.id }, data: { balance: { increment: amountNum } } });
+      transferred = true;
+    });
+    if (!transferred) throw new Error('Insufficient balance');
     await prisma.transaction.create({
       data: {
         userId,
@@ -131,15 +150,23 @@ async function executeActionInternal(
       prisma.vault.findFirst({ where: { userId, type: 'available' } }),
       prisma.vault.findFirst({ where: { userId, type: 'staking' } }),
     ]);
-    if (!avail || avail.balance < amountNum) throw new Error('Insufficient balance');
+    if (!avail) throw new Error('Available vault not found');
     if (!staking) throw new Error('Staking vault not found');
 
     const txHash = `internal:${randomBytes(16).toString('hex')}`;
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: avail.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.vault.update({ where: { id: staking.id }, data: { balance: { increment: amountNum } } }),
-    ]);
+    // Atomic balance transfer — prevents double-spend
+    let staked = false;
+    await prisma.$transaction(async (tx) => {
+      const d = await tx.vault.updateMany({
+        where: { id: avail.id, balance: { gte: amountNum } },
+        data: { balance: { decrement: amountNum } },
+      });
+      if (d.count === 0) return;
+      await tx.vault.update({ where: { id: staking.id }, data: { balance: { increment: amountNum } } });
+      staked = true;
+    });
+    if (!staked) throw new Error('Insufficient balance');
     await prisma.transaction.create({
       data: {
         userId,
@@ -284,7 +311,7 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
       dailyLimit: user?.dailyLimit,
       dailySpent: user?.dailySpent,
       flowAddress: user?.flowAddress,
-      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: v.balance }), {}),
+      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: Number(v.balance) }), {}),
     };
     await prisma.chatMessage.create({
       data: { userId: req.userId!, role: 'user', content: message, parsedIntent: Prisma.JsonNull, confidenceScore: null },
@@ -302,15 +329,8 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
     const aiResponse = await aiService.process(message, context, recentMessages);
     const executionPayload = buildExecutionPayload(aiResponse.intent);
 
-    // Autopilot: auto-execute if user is in autopilot mode and there is an action to take
-    let autopilotResult: { ruleId?: string } | null = null;
-    if (user?.autonomyMode === 'autopilot' && executionPayload) {
-      try {
-        autopilotResult = await executeActionInternal(req.userId!, executionPayload);
-      } catch (e) {
-        logger.warn('Autopilot execution failed', { err: (e as Error).message });
-      }
-    }
+    // Autopilot mode: always show confirmation payload to user
+    // Prevents unintended transactions from AI misinterpretation
 
     const agentMsg = await prisma.chatMessage.create({
       data: {
@@ -328,8 +348,7 @@ router.post('/', auth, async (req: AuthRequest, res: Response) => {
         reply: aiResponse.message,
         intent: aiResponse.intent,
         actionRequired: aiResponse.actionRequired,
-        executionPayload: autopilotResult ? null : executionPayload, // hide button if autopilot already executed
-        autopilotResult,
+        executionPayload,
         messageId: agentMsg.id,
       },
     });
@@ -396,7 +415,7 @@ router.post('/stream', auth, async (req: AuthRequest, res: Response) => {
       dailyLimit: user?.dailyLimit,
       dailySpent: user?.dailySpent,
       flowAddress: user?.flowAddress,
-      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: v.balance }), {}),
+      vaults: vaults.reduce((acc: Record<string, number>, v) => ({ ...acc, [v.type]: Number(v.balance) }), {}),
     };
 
     await prisma.chatMessage.create({

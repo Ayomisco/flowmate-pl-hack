@@ -76,6 +76,9 @@ class GroqService {
     context?: Record<string, any>,
     conversationHistory?: Array<{ role: string; content: string; parsedIntent?: any }>
   ): Promise<AIResponse> {
+    // Input sanitization — limit length, strip control characters
+    userMessage = userMessage.slice(0, 2000).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
     const ctx = context || {};
     const vaultSummary = ctx.vaults
       ? Object.entries(ctx.vaults).map(([k, v]) => `${k}: ${v} FLOW`).join(", ")
@@ -151,8 +154,10 @@ class GroqService {
         };
       }
 
+      // Validate action is in allowed list — prevents LLM from outputting arbitrary actions
+      const validActions = ['send', 'save', 'swap', 'stake', 'dca', 'query', 'greeting', 'chat', 'clarify', 'off_topic'];
       const intent: ParsedIntent = {
-        action: parsed.action || "chat",
+        action: validActions.includes(parsed.action) ? parsed.action : 'chat',
         intent: parsed.intent || userMessage,
         parameters: parsed.parameters || {},
         confidence: parsed.confidence ?? 0.8,

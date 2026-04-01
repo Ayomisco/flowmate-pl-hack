@@ -15,8 +15,8 @@ model User {
   flowAddress       String   @unique
   magicUserId       String   @unique
   autonomyMode      String   @default("manual") // manual | assist | autopilot
-  dailyLimit        Float    @default(10000)
-  dailySpent        Float    @default(0)
+  dailyLimit        Decimal  @default(10000) @db.Decimal(18, 8)
+  dailySpent        Decimal  @default(0) @db.Decimal(18, 8)
   dailyResetTime    DateTime @default(now())
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -89,7 +89,7 @@ model Transaction {
   type              String   // send | receive | swap | stake | dca | bill
   fromAddress       String
   toAddress         String
-  amount            Float
+  amount            Decimal  @db.Decimal(18, 8)
   token             String   @default("FLOW")
   status            String   @default("pending") // pending | confirmed | failed
   explorerUrl       String?
@@ -111,7 +111,7 @@ model Vault {
   id                String   @id @default(cuid())
   userId            String
   type              String   // available | savings | emergency | staking
-  balance           Float    @default(0)
+  balance           Decimal  @default(0) @db.Decimal(18, 8)
   lockedUntil       DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -126,8 +126,8 @@ model Goal {
   id                String   @id @default(cuid())
   userId            String
   name              String
-  targetAmount      Float
-  currentAmount     Float    @default(0)
+  targetAmount      Decimal  @db.Decimal(18, 8)
+  currentAmount     Decimal  @default(0) @db.Decimal(18, 8)
   deadline          DateTime
   status            String   @default("active") // active | achieved | expired
   createdAt         DateTime @default(now())

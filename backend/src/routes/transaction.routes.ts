@@ -14,8 +14,15 @@ function makeTxHash(): string {
 }
 
 function getExplorerUrl(txHash: string): string {
-  if (txHash.startsWith('internal:')) return '';
+  if (txHash.startsWith('internal:') || txHash.startsWith('failed:')) return '';
   return `https://testnet.flowscan.io/tx/${txHash}`;
+}
+
+/** Validate and parse amount — rejects NaN, Infinity, negative, and values over 1M */
+function validateAmount(raw: any): number | null {
+  const num = typeof raw === 'number' ? raw : parseFloat(raw);
+  if (!Number.isFinite(num) || num <= 0 || num > 1_000_000) return null;
+  return num;
 }
 
 // GET /api/v1/transactions
@@ -58,11 +65,15 @@ router.get('/:id', auth, async (req: AuthRequest, res: Response) => {
 // POST /api/v1/transactions/send
 router.post('/send', auth, async (req: AuthRequest, res: Response) => {
   const { recipient, amount, note } = req.body;
-  if (!recipient || !amount || parseFloat(amount) <= 0) {
-    res.status(400).json({ success: false, error: 'recipient and positive amount required' });
+  if (!recipient) {
+    res.status(400).json({ success: false, error: 'Recipient address required' });
     return;
   }
-  const amountNum = parseFloat(amount);
+  const amountNum = validateAmount(amount);
+  if (!amountNum) {
+    res.status(400).json({ success: false, error: 'Amount must be a positive number (max 1,000,000)' });
+    return;
+  }
   try {
     const [user, availableVault] = await Promise.all([
       prisma.user.findUnique({ where: { id: req.userId }, select: { flowAddress: true, dailyLimit: true, dailySpent: true } }),
@@ -72,32 +83,43 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
       res.status(404).json({ success: false, error: 'Available vault not found' });
       return;
     }
-    if (availableVault.balance < amountNum) {
-      res.status(400).json({ success: false, error: `Insufficient balance. Available: ${availableVault.balance} FLOW` });
-      return;
-    }
-    const dailyRemaining = (user?.dailyLimit ?? 10000) - (user?.dailySpent ?? 0);
+    const dailyRemaining = Number(user?.dailyLimit ?? 10000) - Number(user?.dailySpent ?? 0);
     if (amountNum > dailyRemaining) {
-      res.status(400).json({ success: false, error: `Daily limit exceeded. Remaining: ${dailyRemaining} FLOW` });
+      res.status(400).json({ success: false, error: 'Daily limit exceeded' });
       return;
     }
 
-    // Submit to Flow blockchain using admin account (custodial — admin holds funds on-chain)
-    const realTxId = await sendFlowFromAdmin(recipient, amountNum);
-    const txHash = realTxId || makeTxHash();
-    const explorerUrl = getExplorerUrl(txHash);
+    // Atomic balance deduction — prevents double-spend race condition
+    const deducted = await prisma.vault.updateMany({
+      where: { id: availableVault.id, balance: { gte: amountNum } },
+      data: { balance: { decrement: amountNum } },
+    });
+    if (deducted.count === 0) {
+      res.status(400).json({ success: false, error: 'Insufficient balance' });
+      return;
+    }
+
+    // Submit to Flow blockchain
+    let realTxId: string | null = null;
+    try {
+      realTxId = await sendFlowFromAdmin(recipient, amountNum);
+    } catch (e) {
+      // Blockchain error — restore balance
+      await prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { increment: amountNum } } });
+      throw e;
+    }
 
     if (realTxId) {
-      logger.info('Send transaction confirmed on-chain', { userId: req.userId, txHash, recipient, amount: amountNum });
+      await prisma.user.update({ where: { id: req.userId! }, data: { dailySpent: { increment: amountNum } } });
+      logger.info('Send confirmed on-chain', { userId: req.userId, txHash: realTxId, recipient, amount: amountNum });
     } else {
-      logger.warn('On-chain send failed, recording as internal', { userId: req.userId, recipient, amount: amountNum });
+      // On-chain failed — restore balance
+      await prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { increment: amountNum } } });
+      logger.warn('On-chain send failed, balance restored', { userId: req.userId, recipient, amount: amountNum });
     }
 
-    // Update DB
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.user.update({ where: { id: req.userId! }, data: { dailySpent: { increment: amountNum } } }),
-    ]);
+    const txHash = realTxId || `failed:${randomBytes(16).toString('hex')}`;
+    const explorerUrl = getExplorerUrl(txHash);
     const tx = await prisma.transaction.create({
       data: {
         userId: req.userId!,
@@ -107,7 +129,7 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
         toAddress: recipient,
         amount: amountNum,
         token: 'FLOW',
-        status: realTxId ? 'confirmed' : 'pending',
+        status: realTxId ? 'confirmed' : 'failed',
         explorerUrl: explorerUrl || undefined,
         metadata: note ? { note, explorerUrl } : { explorerUrl },
         confirmedAt: realTxId ? new Date() : undefined,
@@ -133,8 +155,9 @@ router.post('/send', auth, async (req: AuthRequest, res: Response) => {
 // Vault-to-vault transfers are tracked in DB (custodial model — vaults are off-chain)
 router.post('/save', auth, async (req: AuthRequest, res: Response) => {
   const { amount, toVault = 'savings' } = req.body;
-  if (!amount || parseFloat(amount) <= 0) {
-    res.status(400).json({ success: false, error: 'positive amount required' });
+  const amountNum = validateAmount(amount);
+  if (!amountNum) {
+    res.status(400).json({ success: false, error: 'Amount must be a positive number (max 1,000,000)' });
     return;
   }
   const validVaults = ['savings', 'emergency', 'staking'];
@@ -142,7 +165,6 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
     res.status(400).json({ success: false, error: `toVault must be one of: ${validVaults.join(', ')}` });
     return;
   }
-  const amountNum = parseFloat(amount);
   try {
     const [user, availableVault, destVault] = await Promise.all([
       prisma.user.findUnique({ where: { id: req.userId }, select: { flowAddress: true } }),
@@ -153,17 +175,24 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
       res.status(404).json({ success: false, error: 'Vault not found' });
       return;
     }
-    if (availableVault.balance < amountNum) {
-      res.status(400).json({ success: false, error: `Insufficient balance. Available: ${availableVault.balance} FLOW` });
-      return;
-    }
 
     const txHash = makeTxHash();
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.vault.update({ where: { id: destVault.id }, data: { balance: { increment: amountNum } } }),
-    ]);
+    // Atomic balance transfer — prevents double-spend race condition
+    let transferred = false;
+    await prisma.$transaction(async (tx) => {
+      const d = await tx.vault.updateMany({
+        where: { id: availableVault.id, balance: { gte: amountNum } },
+        data: { balance: { decrement: amountNum } },
+      });
+      if (d.count === 0) return;
+      await tx.vault.update({ where: { id: destVault.id }, data: { balance: { increment: amountNum } } });
+      transferred = true;
+    });
+    if (!transferred) {
+      res.status(400).json({ success: false, error: 'Insufficient balance' });
+      return;
+    }
     const tx = await prisma.transaction.create({
       data: {
         userId: req.userId!,
@@ -198,15 +227,15 @@ router.post('/save', auth, async (req: AuthRequest, res: Response) => {
 // POST /api/v1/transactions/swap
 router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
   const { fromVault, toVault, amount } = req.body;
-  if (!fromVault || !toVault || !amount || parseFloat(amount) <= 0) {
-    res.status(400).json({ success: false, error: 'fromVault, toVault and positive amount required' });
+  const amountNum = validateAmount(amount);
+  if (!fromVault || !toVault || !amountNum) {
+    res.status(400).json({ success: false, error: 'fromVault, toVault and positive amount (max 1,000,000) required' });
     return;
   }
   if (fromVault === toVault) {
     res.status(400).json({ success: false, error: 'fromVault and toVault must be different' });
     return;
   }
-  const amountNum = parseFloat(amount);
   try {
     const [user, from, to] = await Promise.all([
       prisma.user.findUnique({ where: { id: req.userId }, select: { flowAddress: true } }),
@@ -217,17 +246,24 @@ router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
       res.status(404).json({ success: false, error: 'Vault not found' });
       return;
     }
-    if (from.balance < amountNum) {
-      res.status(400).json({ success: false, error: `Insufficient balance in ${fromVault}: ${from.balance} FLOW` });
-      return;
-    }
 
     const txHash = makeTxHash();
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: from.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.vault.update({ where: { id: to.id }, data: { balance: { increment: amountNum } } }),
-    ]);
+    // Atomic balance transfer — prevents double-spend race condition
+    let transferred = false;
+    await prisma.$transaction(async (tx) => {
+      const d = await tx.vault.updateMany({
+        where: { id: from.id, balance: { gte: amountNum } },
+        data: { balance: { decrement: amountNum } },
+      });
+      if (d.count === 0) return;
+      await tx.vault.update({ where: { id: to.id }, data: { balance: { increment: amountNum } } });
+      transferred = true;
+    });
+    if (!transferred) {
+      res.status(400).json({ success: false, error: 'Insufficient balance' });
+      return;
+    }
     const tx = await prisma.transaction.create({
       data: {
         userId: req.userId!,
@@ -262,11 +298,11 @@ router.post('/swap', auth, async (req: AuthRequest, res: Response) => {
 // POST /api/v1/transactions/stake
 router.post('/stake', auth, async (req: AuthRequest, res: Response) => {
   const { amount } = req.body;
-  if (!amount || parseFloat(amount) <= 0) {
-    res.status(400).json({ success: false, error: 'positive amount required' });
+  const amountNum = validateAmount(amount);
+  if (!amountNum) {
+    res.status(400).json({ success: false, error: 'Amount must be a positive number (max 1,000,000)' });
     return;
   }
-  const amountNum = parseFloat(amount);
   try {
     const [user, availableVault, stakingVault] = await Promise.all([
       prisma.user.findUnique({ where: { id: req.userId }, select: { flowAddress: true } }),
@@ -277,17 +313,24 @@ router.post('/stake', auth, async (req: AuthRequest, res: Response) => {
       res.status(404).json({ success: false, error: 'Vault not found' });
       return;
     }
-    if (availableVault.balance < amountNum) {
-      res.status(400).json({ success: false, error: `Insufficient balance. Available: ${availableVault.balance} FLOW` });
-      return;
-    }
 
     const txHash = makeTxHash();
 
-    await prisma.$transaction([
-      prisma.vault.update({ where: { id: availableVault.id }, data: { balance: { decrement: amountNum } } }),
-      prisma.vault.update({ where: { id: stakingVault.id }, data: { balance: { increment: amountNum } } }),
-    ]);
+    // Atomic balance transfer — prevents double-spend race condition
+    let staked = false;
+    await prisma.$transaction(async (tx) => {
+      const d = await tx.vault.updateMany({
+        where: { id: availableVault.id, balance: { gte: amountNum } },
+        data: { balance: { decrement: amountNum } },
+      });
+      if (d.count === 0) return;
+      await tx.vault.update({ where: { id: stakingVault.id }, data: { balance: { increment: amountNum } } });
+      staked = true;
+    });
+    if (!staked) {
+      res.status(400).json({ success: false, error: 'Insufficient balance' });
+      return;
+    }
     const tx = await prisma.transaction.create({
       data: {
         userId: req.userId!,
