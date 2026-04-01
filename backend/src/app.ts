@@ -1,10 +1,15 @@
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
+import { Prisma } from '@prisma/client';
 import { corsMiddleware } from './middleware/cors.js';
 import { apiLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { env, validateEnv } from './config/env.js';
 import logger from './config/logger.js';
+
+// Prisma Decimal.toJSON() returns a string by default, which breaks arithmetic in the frontend.
+// Override it to emit a plain number so JSON.stringify serializes financial fields correctly.
+(Prisma.Decimal.prototype as any).toJSON = function () { return this.toNumber(); };
 
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -42,7 +47,7 @@ app.use(corsMiddleware);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
-// Convert Prisma Decimal objects to numbers in JSON responses
+// Fallback replacer — handles any Decimal that slipped past the toJSON override
 app.set('json replacer', (_key: string, value: any) => {
   if (value !== null && typeof value === 'object' && typeof value.toNumber === 'function' && 'd' in value && 'e' in value && 's' in value) {
     return value.toNumber();

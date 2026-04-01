@@ -21,7 +21,7 @@ interface Message {
   time: string;
   streaming?: boolean;
   executionPayload?: ExecutionPayload | null;
-  executionResult?: { explorerUrl: string } | null;
+  executionResult?: { explorerUrl: string; txHash?: string; amount?: number; type?: string; toAddress?: string } | null;
 }
 
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -73,9 +73,17 @@ const Chat = () => {
     setExecuting(msgId);
     try {
       const { data } = await api.post(payload.endpoint, payload.body);
-      const explorerUrl = data.data?.explorerUrl;
+      const tx = data.data?.transaction || data.data || {};
+      const explorerUrl: string = tx.explorerUrl || data.data?.explorerUrl || '';
+      const executionResult = {
+        explorerUrl,
+        txHash: tx.txHash,
+        amount: tx.amount != null ? Number(tx.amount) : undefined,
+        type: tx.type,
+        toAddress: tx.toAddress,
+      };
       setMessages(prev => prev.map(m =>
-        m.id === msgId ? { ...m, executionPayload: null, executionResult: { explorerUrl } } : m
+        m.id === msgId ? { ...m, executionPayload: null, executionResult } : m
       ));
       queryClient.invalidateQueries({ queryKey: ["vaults"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -254,11 +262,31 @@ const Chat = () => {
                     {msg.executionResult && (
                       <div className="card-secondary border border-primary/30 space-y-2">
                         <p className="text-sm font-medium text-primary">Transaction confirmed!</p>
-                        {msg.executionResult.explorerUrl && (
+                        {msg.executionResult.amount != null && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground capitalize">{msg.executionResult.type || 'amount'}</span>
+                            <span className="font-semibold">{msg.executionResult.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })} FLOW</span>
+                          </div>
+                        )}
+                        {msg.executionResult.toAddress && !msg.executionResult.toAddress.startsWith('vault:') && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">To</span>
+                            <span className="font-mono truncate max-w-[160px]">{msg.executionResult.toAddress}</span>
+                          </div>
+                        )}
+                        {msg.executionResult.txHash && !msg.executionResult.txHash.startsWith('internal:') && !msg.executionResult.txHash.startsWith('failed:') && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">TX Hash</span>
+                            <span className="font-mono truncate max-w-[160px]">{msg.executionResult.txHash.slice(0, 12)}…</span>
+                          </div>
+                        )}
+                        {msg.executionResult.explorerUrl ? (
                           <a href={msg.executionResult.explorerUrl} target="_blank" rel="noopener noreferrer"
                             className="flex items-center gap-2 text-sm text-primary hover:underline">
                             <ExternalLink className="w-3 h-3" /> View on Flowscan
                           </a>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Vault updated — no on-chain record needed</p>
                         )}
                       </div>
                     )}

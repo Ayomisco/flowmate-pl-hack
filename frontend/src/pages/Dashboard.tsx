@@ -28,6 +28,7 @@ interface Transaction {
 
 const TX_ICON: Record<string, any> = {
   receive: <ArrowDownLeft className="w-4 h-4" />,
+  send: <ArrowUpRight className="w-4 h-4" />,
   save: <PiggyBank className="w-4 h-4" />,
   swap: <ArrowDownUp className="w-4 h-4" />,
   stake: <ArrowDownUp className="w-4 h-4" />,
@@ -63,9 +64,10 @@ const Dashboard = () => {
     queryFn: async () => { const { data } = await api.get("/api/v1/goals"); return data.data as Goal[]; },
   });
 
-  const vaults = vaultData || [];
+  // Coerce balance to number defensively — Prisma Decimal may arrive as a string
+  const vaults = (vaultData || []).map(v => ({ ...v, balance: Number(v.balance) || 0 }));
   const transactions = txData || [];
-  const totalBalance = vaults.reduce((sum, v) => sum + (v.balance || 0), 0);
+  const totalBalance = vaults.reduce((sum, v) => sum + v.balance, 0);
   const availableBalance = vaults.find(v => v.type === "available")?.balance || 0;
   const activeRules = (rulesData || []).filter(r => r.status === "active");
   const activeGoals = (goalsData || []).filter(g => g.status === "active");
